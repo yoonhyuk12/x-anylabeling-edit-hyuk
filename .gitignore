@@ -183,3 +183,7 @@ pnnx*
 
 # calibration image
 calibration_*.npy
+
+# Upstream release and website publishing automation is local-only in this fork.
+/.github/workflows/release.yml
+/.github/workflows/sync-website-content.yml

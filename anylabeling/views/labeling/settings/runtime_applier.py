@@ -269,11 +269,15 @@ class SettingsRuntimeApplier:
         ):
             self.apply_dock_features()
             return
+        if key == "image_prefetch_count":
+            self._widget._prefetch_neighbor_files()
+            return
         if key in {
             "display_label_popup",
             "auto_highlight_shape",
             "auto_switch_to_edit_mode",
             "exif_scan_enabled",
+            "fast_folder_loading",
             "switch_to_checked",
             "file_list_checkbox_editable",
             "system_clipboard",

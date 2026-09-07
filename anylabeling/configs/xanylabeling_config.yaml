@@ -15,6 +15,8 @@ auto_use_last_gid: false
 auto_highlight_shape: true
 auto_switch_to_edit_mode: true
 exif_scan_enabled: true
+fast_folder_loading: true
+image_prefetch_count: 5
 show_groups: false
 show_masks: true
 show_texts: true

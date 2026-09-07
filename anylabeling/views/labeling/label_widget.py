@@ -61,10 +61,11 @@ from .schema import IMAGE_TAGS_FIELD
 from .settings import SettingsController, SettingsDialog
 from .settings.runtime_applier import SettingsRuntimeApplier
 from .shape import Shape
-from .utils.file_search import (
-    parse_search_pattern,
-    matches_filename,
-    matches_label_attribute,
+from .utils.file_prefetch import FilePrefetchCache
+from .utils.folder_scan import (
+    label_path,
+    run_cancellable_task,
+    scan_image_folder,
 )
 from .utils.qt import new_icon_path
 from .widgets import (
@@ -207,6 +208,7 @@ class LabelingWidget(LabelDialog):
         self._settings_controller = None
         self._settings_dialog = None
         self.training_dialog = None
+        self._file_prefetcher = FilePrefetchCache()
         self._settings_runtime_applier = SettingsRuntimeApplier(self)
         self._auto_switch_signal_connected = False
 
@@ -355,6 +357,7 @@ class LabelingWidget(LabelDialog):
         self.file_list_widget = QtWidgets.QListWidget()
         self.file_list_widget.setObjectName("FileList")
         self.file_list_widget.setIconSize(QtCore.QSize(12, 12))
+        self.file_list_widget.setUniformItemSizes(True)
         self.file_status_icons = {
             True: _create_file_status_icon(FILE_CHECKED_COLOR),
             False: _create_file_status_icon(
@@ -3364,6 +3367,9 @@ class LabelingWidget(LabelDialog):
         modify_label_dialog = LabelModifyDialog(
             parent=self, opacity=LABEL_OPACITY
         )
+        if not modify_label_dialog.labels_loaded:
+            modify_label_dialog.deleteLater()
+            return
         result = modify_label_dialog.exec()
         if result == QtWidgets.QDialog.DialogCode.Accepted:
             if self.filename:
@@ -3923,12 +3929,13 @@ class LabelingWidget(LabelDialog):
         )
         popup.show_popup(self, copy_msg=file_path, position="default")
 
-    def _label_file_checked(self, label_file):
+    @staticmethod
+    def _label_file_checked(label_file):
         if not QtCore.QFile.exists(label_file):
             return False
         try:
             buffer = ""
-            with open(label_file, "r", encoding="utf-8") as f:
+            with utils.open_file(label_file, "r", encoding="utf-8") as f:
                 while True:
                     chunk = f.read(8192)
                     if not chunk:
@@ -3946,23 +3953,43 @@ class LabelingWidget(LabelDialog):
             return
         item.setIcon(self.file_status_icons[checked])
         item.setData(Qt.ItemDataRole.UserRole, checked)
+        item.setToolTip(item.text())
 
     def _file_item_annotation_checked(self, item):
+        if item.data(Qt.ItemDataRole.UserRole) is None:
+            checked = self._label_file_checked(
+                label_path(item.text(), self.output_dir)
+            )
+            self._set_file_item_checked(item, checked)
         return item.data(Qt.ItemDataRole.UserRole) is True
 
-    def _create_file_list_item(self, file, label_file):
+    def _create_file_list_item(
+        self, file, label_file, label_exists=None, checked=None
+    ):
         item = QtWidgets.QListWidgetItem(file)
         flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         if self._config.get("file_list_checkbox_editable", False):
             flags |= Qt.ItemFlag.ItemIsUserCheckable
         item.setFlags(flags)
-        if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(
-            label_file
-        ):
+        defer_checked = label_exists is not None
+        if label_exists is None:
+            label_exists = QtCore.QFile.exists(label_file)
+        if label_exists and LabelFile.is_label_file(label_file):
             item.setCheckState(Qt.CheckState.Checked)
         else:
             item.setCheckState(Qt.CheckState.Unchecked)
-        self._set_file_item_checked(item, self._label_file_checked(label_file))
+        if checked is not None:
+            self._set_file_item_checked(item, checked)
+        elif defer_checked and label_exists:
+            # None means unknown, distinct from an unchecked annotation.
+            item.setToolTip(
+                file + "\n" + self.tr("Review status will be read when opened")
+            )
+        else:
+            checked = (
+                self._label_file_checked(label_file) if label_exists else False
+            )
+            self._set_file_item_checked(item, checked)
         return item
 
     def _current_file_item(self):
@@ -5916,6 +5943,11 @@ class LabelingWidget(LabelDialog):
         if filename is None:
             filename = self.settings.value("filename", "")
         filename = str(filename)
+        read_file = (
+            self._file_prefetcher.read
+            if self._config.get("image_prefetch_count", 5) > 0
+            else None
+        )
         if not QtCore.QFile.exists(filename):
             self.error_message(
                 self.tr("Error opening file"),
@@ -5935,7 +5967,9 @@ class LabelingWidget(LabelDialog):
             label_file
         ):
             try:
-                self.label_file = LabelFile(label_file, image_dir)
+                self.label_file = LabelFile(
+                    label_file, image_dir, read_file=read_file
+                )
             except LabelFileError as e:
                 self.error_message(
                     self.tr("Error opening file"),
@@ -5959,7 +5993,9 @@ class LabelingWidget(LabelDialog):
                     self.other_data.get("description", "")
                 )
         else:
-            self.image_data = LabelFile.load_image_file(filename)
+            self.image_data = LabelFile.load_image_file(
+                filename, read_file=read_file
+            )
             if self.image_data:
                 self.image_path = filename
             self.label_file = None
@@ -6103,7 +6139,26 @@ class LabelingWidget(LabelDialog):
         if self.compare_view_manager.is_active():
             self.compare_view_manager.load_compare_for_file(self.filename)
 
+        self._prefetch_neighbor_files()
         return True
+
+    def _prefetch_neighbor_files(self):
+        count = max(0, min(20, self._config.get("image_prefetch_count", 5)))
+        index = self.fn_to_index.get(str(self.filename))
+        if not count or index is None:
+            self._file_prefetcher.clear()
+            return
+        # Read the nearest next image/label first; keep two previous images
+        # and the current one for short backward/forward navigation.
+        total = self.file_list_widget.count()
+        indices = list(range(index + 1, min(total, index + count + 1)))
+        indices.extend(range(index - 1, max(-1, index - 3), -1))
+        indices.append(index)
+        paths = []
+        for neighbor in indices:
+            path = self.file_list_widget.item(neighbor).text()
+            paths.extend((path, label_path(path, self.output_dir)))
+        self._file_prefetcher.prefetch(paths)
 
     # QT Overload
     def keyPressEvent(self, event):
@@ -6215,6 +6270,9 @@ class LabelingWidget(LabelDialog):
             except (RuntimeError, AttributeError):
                 pass
 
+        if event.isAccepted():
+            self._file_prefetcher.close()
+
         # ask the use for where to save the labels
         # self.settings.setValue('window/geometry', self.saveGeometry())
 
@@ -6244,40 +6302,61 @@ class LabelingWidget(LabelDialog):
         self.import_image_folder(dirpath)
 
     def open_prev_unchecked_image(self):
-        if (
-            not self.may_continue()
-            or len(self.image_list) <= 0
-            or self.filename is None
-        ):
-            return
-
-        current_index = self.fn_to_index[str(self.filename)]
-        for i in range(current_index - 1, -1, -1):
-            if not self._file_item_annotation_checked(
-                self.file_list_widget.item(i)
-            ):
-                filename = self.image_list[i]
-                if filename:
-                    self.load_file(filename)
-                break
+        self._open_unchecked_image(-1)
 
     def open_next_unchecked_image(self, _value=False):
+        self._open_unchecked_image(1)
+
+    def _open_unchecked_image(self, direction):
         if (
             not self.may_continue()
-            or len(self.image_list) <= 0
+            or self.file_list_widget.count() <= 0
             or self.filename is None
         ):
             return
 
         current_index = self.fn_to_index[str(self.filename)]
-        for i in range(current_index + 1, len(self.image_list)):
-            if not self._file_item_annotation_checked(
-                self.file_list_widget.item(i)
-            ):
-                filename = self.image_list[i]
-                if filename:
-                    self.load_file(filename)
+        end = self.file_list_widget.count() if direction > 0 else -1
+        candidates = []
+        for i in range(current_index + direction, end, direction):
+            item = self.file_list_widget.item(i)
+            checked = item.data(Qt.ItemDataRole.UserRole)
+            candidates.append((i, item.text(), checked))
+            if checked is False:
                 break
+        if not candidates:
+            return
+
+        output_dir = self.output_dir
+        read_checked = self._label_file_checked
+
+        def find_unchecked(cancel, report):
+            resolved = []
+            target = None
+            for count, (index, filename, checked) in enumerate(candidates, 1):
+                if cancel.is_set():
+                    return None
+                report(count, len(candidates))
+                if checked is None:
+                    checked = read_checked(label_path(filename, output_dir))
+                    resolved.append((index, checked))
+                if not checked:
+                    target = filename
+                    break
+            return target, resolved
+
+        result = run_cancellable_task(
+            self, self.tr("Finding unchecked image..."), find_unchecked
+        )
+        if result is None:
+            return
+        filename, resolved = result
+        for index, checked in resolved:
+            self._set_file_item_checked(
+                self.file_list_widget.item(index), checked
+            )
+        if filename:
+            self.load_file(filename)
 
     def open_prev_image(self, _value=False):
         if not self.may_continue():
@@ -6625,7 +6704,7 @@ class LabelingWidget(LabelDialog):
             return False
 
         label_file = self.get_label_file()
-        return osp.exists(label_file)
+        return osp.exists(utils.io_path(label_file))
 
     def may_continue(self):
         self.image_tags_widget.finish_for_image_change()
@@ -6792,48 +6871,59 @@ class LabelingWidget(LabelDialog):
         if not self.may_continue() or not dirpath:
             return
 
+        extensions = utils.get_supported_image_extensions()
+        output_dir = self.output_dir
+        read_checked = (
+            None
+            if self._config.get("fast_folder_loading", True)
+            else self._label_file_checked
+        )
+        try:
+            contents = run_cancellable_task(
+                self,
+                self.tr("Reading image folder..."),
+                lambda cancel, report: scan_image_folder(
+                    dirpath,
+                    extensions,
+                    output_dir,
+                    pattern,
+                    cancel=cancel,
+                    report=report,
+                    read_checked=read_checked,
+                ),
+            )
+        except Exception as error:
+            self.error_message(self.tr("Error opening folder"), str(error))
+            return
+        if contents is None:
+            return
+
+        self._file_prefetcher.clear()
         if self.compare_view_manager.is_active():
             self.close_compare_view(confirm=False)
 
         self.last_open_dir = dirpath
         self.filename = None
-        self.file_list_widget.clear()
-        image_files = []
-
-        search_pattern = parse_search_pattern(pattern) if pattern else None
-
-        for file_index, filename in enumerate(
-            utils.scan_all_images(dirpath), start=1
-        ):
-            if search_pattern:
-                if search_pattern.mode == "index":
-                    if search_pattern.index != file_index:
-                        continue
-                else:
-                    if not matches_filename(filename, search_pattern):
-                        continue
-
-                    if search_pattern.mode == "attribute":
-                        label_file = osp.splitext(filename)[0] + ".json"
-                        if self.output_dir:
-                            label_file_without_path = osp.basename(label_file)
-                            label_file = (
-                                self.output_dir + "/" + label_file_without_path
-                            )
-
-                        if not matches_label_attribute(
-                            filename, label_file, search_pattern
-                        ):
-                            continue
-
-            image_files.append(filename)
-            label_file = osp.splitext(filename)[0] + ".json"
-            if self.output_dir:
-                label_file_without_path = osp.basename(label_file)
-                label_file = self.output_dir + "/" + label_file_without_path
-            item = self._create_file_list_item(filename, label_file)
-            self.file_list_widget.addItem(item)
-            self.fn_to_index[filename] = self.file_list_widget.count() - 1
+        image_files = contents.image_files
+        self.file_list_widget.setUpdatesEnabled(False)
+        try:
+            with QtCore.QSignalBlocker(self.file_list_widget):
+                self.file_list_widget.clear()
+                self.fn_to_index.clear()
+                for index, filename in enumerate(image_files):
+                    label_file = label_path(filename, output_dir)
+                    item = self._create_file_list_item(
+                        filename,
+                        label_file,
+                        label_exists=(
+                            osp.normcase(label_file) in contents.label_files
+                        ),
+                        checked=contents.review_statuses.get(filename),
+                    )
+                    self.file_list_widget.addItem(item)
+                    self.fn_to_index[filename] = index
+        finally:
+            self.file_list_widget.setUpdatesEnabled(True)
 
         self.actions.open_next_image.setEnabled(True)
         self.actions.open_prev_image.setEnabled(True)

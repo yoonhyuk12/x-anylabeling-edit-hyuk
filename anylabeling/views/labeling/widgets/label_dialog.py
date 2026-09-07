@@ -19,6 +19,10 @@ from anylabeling.views.labeling.logger import logger
 from anylabeling.views.labeling.shape import Shape
 from anylabeling.views.labeling.widgets.popup import Popup
 from anylabeling.views.labeling.utils.qt import new_icon_path
+from anylabeling.views.labeling.utils.folder_scan import (
+    run_cancellable_task,
+    scan_label_classes,
+)
 from anylabeling.views.labeling.utils.style import (
     get_cancel_btn_style,
     get_dialog_style,
@@ -369,7 +373,7 @@ class GroupIDModifyDialog(QtWidgets.QDialog):
             label_file = os.path.join(
                 label_dir, os.path.splitext(filename)[0] + ".json"
             )
-            if os.path.exists(label_file):
+            if os.path.exists(utils.io_path(label_file)):
                 shape_file_list.append(label_file)
         return shape_file_list
 
@@ -383,7 +387,7 @@ class GroupIDModifyDialog(QtWidgets.QDialog):
         gid_info = set()
 
         for shape_file in self.shape_list:
-            with open(shape_file, "r", encoding="utf-8") as f:
+            with utils.open_file(shape_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             shapes = data.get("shapes", [])
@@ -697,9 +701,9 @@ class GroupIDModifyDialog(QtWidgets.QDialog):
                 label_file = os.path.join(
                     label_dir, os.path.splitext(filename)[0] + ".json"
                 )
-                if not os.path.exists(label_file):
+                if not os.path.exists(utils.io_path(label_file)):
                     continue
-                with open(label_file, "r", encoding="utf-8") as f:
+                with utils.open_file(label_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
                 src_shapes, dst_shapes = data["shapes"], []
@@ -717,7 +721,7 @@ class GroupIDModifyDialog(QtWidgets.QDialog):
                     dst_shapes.append(shape)
                 data["shapes"] = dst_shapes
 
-                with open(label_file, "w", encoding="utf-8") as f:
+                with utils.open_file(label_file, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
 
             return True
@@ -779,8 +783,9 @@ class LabelModifyDialog(QtWidgets.QDialog):
         self.image_file_list = self.get_image_file_list()
         self.start_index = 1
         self.end_index = len(self.image_file_list)
-        self.init_label_info()
-        self.init_ui()
+        self.labels_loaded = self.init_label_info()
+        if self.labels_loaded:
+            self.init_ui()
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -1137,9 +1142,9 @@ class LabelModifyDialog(QtWidgets.QDialog):
                 label_file = os.path.join(
                     label_dir, os.path.splitext(filename)[0] + ".json"
                 )
-                if not os.path.exists(label_file):
+                if not os.path.exists(utils.io_path(label_file)):
                     continue
-                with open(label_file, "r", encoding="utf-8") as f:
+                with utils.open_file(label_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 src_shapes, dst_shapes = data["shapes"], []
                 for shape in src_shapes:
@@ -1152,7 +1157,7 @@ class LabelModifyDialog(QtWidgets.QDialog):
                         shape["label"] = self.parent.label_info[label]["value"]
                     dst_shapes.append(shape)
                 data["shapes"] = dst_shapes
-                with open(label_file, "w", encoding="utf-8") as f:
+                with utils.open_file(label_file, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
@@ -1160,23 +1165,24 @@ class LabelModifyDialog(QtWidgets.QDialog):
             return False
 
     def init_label_info(self):
-        classes = set()
-
-        for image_file in self.image_file_list:
-            label_dir, filename = os.path.split(image_file)
-            if self.parent.output_dir:
-                label_dir = self.parent.output_dir
-            label_file = os.path.join(
-                label_dir, os.path.splitext(filename)[0] + ".json"
+        image_files = tuple(self.image_file_list)
+        output_dir = self.parent.output_dir
+        try:
+            classes = run_cancellable_task(
+                self.parent,
+                self.tr("Loading labels..."),
+                lambda cancel, report: scan_label_classes(
+                    image_files, output_dir, cancel=cancel, report=report
+                ),
             )
-            if not os.path.exists(label_file):
-                continue
-            with open(label_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            shapes = data.get("shapes", [])
-            for shape in shapes:
-                label = shape["label"]
-                classes.add(label)
+        except Exception as error:
+            logger.error(f"Error loading labels: {error}")
+            QtWidgets.QMessageBox.critical(
+                self.parent, self.tr("Error loading labels"), str(error)
+            )
+            return False
+        if classes is None:
+            return False
 
         for i in range(self.parent.unique_label_list.count()):
             item = self.parent.unique_label_list.item(i)
@@ -1217,6 +1223,7 @@ class LabelModifyDialog(QtWidgets.QDialog):
                 opacity=opacity,
                 visible=visible,
             )
+        return True
 
     def update_range(self):
         from_value = (

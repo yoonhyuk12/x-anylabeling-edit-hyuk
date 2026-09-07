@@ -3,6 +3,8 @@ import os.path as osp
 import re
 from typing import Dict, Optional
 
+from ._io import io_path, open_file
+
 
 class SearchPattern:
     """Represents a parsed search pattern."""
@@ -246,13 +248,13 @@ def matches_label_attribute(
     filter_type = search_pattern.attribute_filter["type"]
     filter_value = search_pattern.attribute_filter["value"]
 
-    if not osp.exists(label_file):
+    if not osp.exists(io_path(label_file)):
         if filter_type == "checked":
             return filter_value is False
         return False
 
     try:
-        with open(label_file, "r", encoding="utf-8") as f:
+        with open_file(label_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         shapes = data.get("shapes", [])
 

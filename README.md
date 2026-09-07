@@ -1,3 +1,37 @@
+# x-anylabeling-edit-hyuk
+
+[X-AnyLabeling](https://github.com/CVHub520/X-AnyLabeling) v4.0.6 기반의 수정본입니다.
+네트워크 폴더 로딩 개선, 이미지·라벨 미리 읽기, Windows 긴 경로 처리를 포함합니다.
+
+## Windows에서 실행
+
+1. Python 3.12를 설치합니다. 설치 시 Python Launcher도 포함해야 합니다.
+2. 이 저장소를 내려받아 압축을 풀거나 아래 명령으로 복제합니다.
+3. `X-AnyLabeling 실행.bat`를 더블클릭합니다. 처음에는 인터넷 연결을 통해 CPU용 환경과 패키지를 자동 설치하며, 이후에는 앱을 실행합니다.
+
+```powershell
+git clone https://github.com/yoonhyuk12/x-anylabeling-edit-hyuk.git
+cd x-anylabeling-edit-hyuk
+& '.\X-AnyLabeling 실행.bat'
+```
+
+Git으로 설치했다면 앱을 종료한 뒤 `git pull --ff-only`로 업데이트합니다.
+패키지 의존성이 변경된 경우 `.\.venv-cpu\Scripts\python.exe -m uv pip install -e ".[cpu]"`를 다시 실행합니다.
+가상환경과 AI 모델 가중치는 저장소에 포함하지 않습니다. GPU 설치 방법은 아래 원본 문서를 참고하세요.
+
+## 여러 사람이 사용할 때
+
+각자 PC에 설치한 뒤 접근 권한이 있는 공유 폴더를 열어 사용할 수 있습니다.
+작업 자동 배정이나 동시 편집 잠금은 없으므로 **담당 이미지 또는 하위 폴더를 나눠 작업하세요.**
+같은 이미지의 라벨을 동시에 수정하면 나중에 저장한 내용으로 덮어써질 수 있습니다.
+
+설정의 `Fast Folder Loading`은 폴더를 열 때 검토 상태를 필요할 때만 읽습니다.
+`Images To Read Ahead`는 미리 읽을 이미지 수이며 기본값은 5, 0으로 설정하면 비활성화됩니다.
+
+원본 프로젝트의 GPL-3.0 라이선스와 저작자 표기를 유지합니다. 아래는 원본 프로젝트 안내입니다.
+
+---
+
 <div align="center">
   <p>
     <a href="https://github.com/CVHub520/X-AnyLabeling/" target="_blank">

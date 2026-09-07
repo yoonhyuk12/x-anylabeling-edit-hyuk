@@ -60,6 +60,12 @@ def _settings_translation_markers() -> None:
         "Automatically switch selected objects into edit mode.",
     )
     QCoreApplication.translate("SettingsDialog", "Enable EXIF Scan")
+    QCoreApplication.translate("SettingsDialog", "Fast Folder Loading")
+    QCoreApplication.translate(
+        "SettingsDialog",
+        "Read review status only when needed. Turn off to read all review "
+        "statuses when opening a folder. Applies when reopening a folder.",
+    )
     QCoreApplication.translate(
         "SettingsDialog",
         "Scan EXIF metadata when loading directories; this adds overhead.",
@@ -272,6 +278,8 @@ SETTINGS_GENERAL_KEYS = (
     "auto_highlight_shape",
     "auto_switch_to_edit_mode",
     "exif_scan_enabled",
+    "fast_folder_loading",
+    "image_prefetch_count",
     "file_list_checkbox_editable",
     "system_clipboard",
     "font_family",
@@ -534,6 +542,41 @@ def _non_shortcut_fields() -> list[SettingField]:
             description=QT_TRANSLATE_NOOP(
                 SETTINGS_TRANSLATION_CONTEXT,
                 "Scan EXIF metadata when loading directories; this adds overhead.",
+            ),
+        ),
+        SettingField(
+            "fast_folder_loading",
+            QT_TRANSLATE_NOOP(
+                SETTINGS_TRANSLATION_CONTEXT, "Fast Folder Loading"
+            ),
+            "bool",
+            "General",
+            "File List",
+            "Navigation",
+            description=QT_TRANSLATE_NOOP(
+                SETTINGS_TRANSLATION_CONTEXT,
+                "Read review status only when needed. Turn off to read all "
+                "review statuses when opening a folder. Applies when "
+                "reopening a folder.",
+            ),
+        ),
+        SettingField(
+            "image_prefetch_count",
+            QT_TRANSLATE_NOOP(
+                SETTINGS_TRANSLATION_CONTEXT, "Images To Read Ahead"
+            ),
+            "int",
+            "General",
+            "File List",
+            "Navigation",
+            minimum=0,
+            maximum=20,
+            description=QT_TRANSLATE_NOOP(
+                SETTINGS_TRANSLATION_CONTEXT,
+                "Read upcoming images and labels in the background to reduce "
+                "navigation delays on network drives. Use 0 to disable. "
+                "More images use more bandwidth; the cache is limited to "
+                "128 MB. Applies immediately.",
             ),
         ),
         SettingField(

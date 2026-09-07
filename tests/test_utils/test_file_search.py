@@ -1,20 +1,13 @@
-import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 
-MODULE_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "anylabeling/views/labeling/utils/file_search.py"
+from anylabeling.views.labeling.utils.file_search import (
+    filter_image_files,
+    parse_search_pattern,
 )
-SPEC = importlib.util.spec_from_file_location("file_search_module", MODULE_PATH)
-FILE_SEARCH_MODULE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(FILE_SEARCH_MODULE)
-
-filter_image_files = FILE_SEARCH_MODULE.filter_image_files
-parse_search_pattern = FILE_SEARCH_MODULE.parse_search_pattern
 
 
 class TestFileSearch(unittest.TestCase):

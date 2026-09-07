@@ -36,7 +36,7 @@ from .image import (
     process_image_exif,
 )
 from .image_tags import normalize_image_tag, normalize_image_tags
-from ._io import io_open
+from ._io import io_open, io_path, open_file
 from .qt import (
     Struct,
     StayOpenMenuFilter,

@@ -26,11 +26,12 @@ class LabelFileError(Exception):
 class LabelFile:
     suffix = ".json"
 
-    def __init__(self, filename=None, image_dir=None):
+    def __init__(self, filename=None, image_dir=None, *, read_file=None):
         self.shapes = []
         self.image_path = None
         self.image_data = None
         self.image_dir = image_dir
+        self._read_file = read_file
         if filename is not None:
             self.load(filename)
         self.filename = filename
@@ -57,9 +58,11 @@ class LabelFile:
         return osp.splitext(filename)[1].lower() == LabelFile.suffix
 
     @staticmethod
-    def load_image_file(filename, default=None):
+    def load_image_file(filename, default=None, *, read_file=None):
         try:
-            with open(filename, "rb") as f:
+            if read_file is not None:
+                return read_file(filename)
+            with utils.open_file(filename, "rb") as f:
                 return f.read()
         except Exception:
             logger.error(f"Failed opening image file: {filename}")
@@ -67,8 +70,11 @@ class LabelFile:
 
     def load(self, filename):
         try:
-            with utils.io_open(filename, "r") as f:
-                data = json.load(f)
+            if self._read_file is not None:
+                data = json.loads(self._read_file(filename))
+            else:
+                with utils.io_open(filename, "r") as f:
+                    data = json.load(f)
 
             if data.get("version") is None:
                 logger.warning(
@@ -101,7 +107,9 @@ class LabelFile:
                     image_path = osp.join(
                         osp.dirname(filename), data["imagePath"]
                     )
-                image_data = self.load_image_file(image_path)
+                image_data = self.load_image_file(
+                    image_path, read_file=self._read_file
+                )
 
             flags = data.get("flags", {})
             image_path = data["imagePath"]
@@ -188,7 +196,8 @@ class LabelFile:
             data[key] = value
         temporary_file = None
         try:
-            directory = osp.dirname(osp.abspath(filename))
+            target = utils.io_path(osp.abspath(filename))
+            directory = osp.dirname(target)
             fd, temporary_file = tempfile.mkstemp(
                 prefix=".xal_",
                 suffix=".tmp",
@@ -198,7 +207,7 @@ class LabelFile:
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(temporary_file, filename)
+            os.replace(temporary_file, target)
             self.filename = filename
         except Exception as e:  # noqa
             raise LabelFileError(e) from e

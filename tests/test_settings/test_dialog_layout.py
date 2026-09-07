@@ -207,9 +207,52 @@ class TestSettingsDialogLayout(unittest.TestCase):
         dialog._render_primary("General")
         self.app.processEvents()
 
-        spinboxes = dialog.content_body.findChildren(QtWidgets.QSpinBox)
+        spinboxes = dialog._field_rows["qt_image_allocation_limit"].findChildren(
+            QtWidgets.QSpinBox
+        )
         self.assertEqual(len(spinboxes), 1)
         self.assertEqual(spinboxes[0].value(), 256)
+
+    def test_image_prefetch_count_saves_and_restores(self):
+        dialog = self._create_dialog()
+        dialog._render_primary("General")
+        self.app.processEvents()
+        spinbox = dialog._field_rows["image_prefetch_count"].findChild(
+            QtWidgets.QSpinBox
+        )
+        self.assertEqual(spinbox.value(), 5)
+        self.assertEqual((spinbox.minimum(), spinbox.maximum()), (0, 20))
+        spinbox.setValue(0)
+        controller = dialog._controller
+        controller.save_now()
+        self.assertEqual(controller._config["image_prefetch_count"], 0)
+        restored = SettingsController(
+            config=copy.deepcopy(controller._config),
+            save_callback=lambda _config: True,
+        )
+        self.assertEqual(restored.get_value("image_prefetch_count"), 0)
+
+    def test_fast_folder_loading_checkbox_saves_and_restores(self):
+        dialog = self._create_dialog()
+        dialog._render_primary("General")
+        self.app.processEvents()
+        checkbox = dialog._field_rows["fast_folder_loading"].findChild(
+            QtWidgets.QCheckBox
+        )
+        self.assertTrue(checkbox.isChecked())
+        checkbox.click()
+        controller = dialog._controller
+        self.assertFalse(controller.get_value("fast_folder_loading"))
+        controller.save_now()
+        self.assertFalse(controller._config["fast_folder_loading"])
+        restored = SettingsController(
+            config=copy.deepcopy(controller._config),
+            save_callback=lambda _config: True,
+        )
+        self.assertFalse(restored.get_value("fast_folder_loading"))
+        checkbox.click()
+        controller.save_now()
+        self.assertTrue(controller._config["fast_folder_loading"])
 
     def test_general_font_selector_lists_available_font_families(self):
         dialog = self._create_dialog()

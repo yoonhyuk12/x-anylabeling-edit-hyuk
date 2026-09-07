@@ -1,7 +1,9 @@
 # x-anylabeling-edit-hyuk
-
 [X-AnyLabeling](https://github.com/CVHub520/X-AnyLabeling) v4.0.6 기반의 수정본입니다.
 네트워크 폴더 로딩 개선, 이미지·라벨 미리 읽기, Windows 긴 경로 처리를 포함합니다.
+
+## 혁 에디션 사항
+1. 여러 사람이 할수 있게 함
 
 ## Windows에서 실행
 

@@ -21,6 +21,12 @@ Git으로 설치했다면 앱을 종료한 뒤 `git pull --ff-only`로 업데이
 패키지 의존성이 변경된 경우 `.\.venv-cpu\Scripts\python.exe -m uv pip install -e ".[cpu]"`를 다시 실행합니다.
 가상환경과 AI 모델 가중치는 저장소에 포함하지 않습니다. GPU 설치 방법은 아래 원본 문서를 참고하세요.
 
+## no_harness 자동 라벨링
+
+SafetyVision v2 모델에서 `no_harness`만 검출하는 [설정과 사용 안내](examples/detection/no_harness/README.md)를 제공합니다.
+저장소 루트에서 `py -3.12 scripts/download_safetyvision.py`로 모델을 받은 뒤,
+자동 라벨링의 사용자 정의 모델에서 `examples/detection/no_harness/no_harness.yaml`을 선택하세요.
+
 ## 여러 사람이 사용할 때
 
 각자 PC에 설치한 뒤 접근 권한이 있는 공유 폴더를 열어 사용할 수 있습니다.

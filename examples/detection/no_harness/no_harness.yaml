@@ -1,0 +1,25 @@
+# Source class ID 10: No_Harness. Only its display label is renamed.
+type: yolov8
+name: safetyvision-v2-no-harness
+provider: ayushgupta7777 / Ultralytics
+display_name: SafetyVision v2 - no_harness only (896)
+model_path: ../../../weights/safetyvision-v2/best_896.onnx
+iou_threshold: 0.45
+conf_threshold: 0.25
+max_det: 300
+filter_classes:
+  - no_harness
+classes:
+  - Fall-Detected
+  - Gloves
+  - Goggles
+  - Hardhat
+  - Mask
+  - NO-Gloves
+  - NO-Goggles
+  - NO-Hardhat
+  - NO-Mask
+  - NO-Safety Vest
+  - no_harness
+  - Person
+  - Safety Vest

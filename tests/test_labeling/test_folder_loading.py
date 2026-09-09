@@ -52,6 +52,7 @@ class FolderHarness(QtWidgets.QWidget):
         self.async_exif_scanner = mock.Mock()
         self.error_message = mock.Mock()
         self._file_prefetcher = mock.Mock()
+        self._remembered_folder_file = mock.Mock(return_value=None)
 
 
 class TestFolderLoading(unittest.TestCase):

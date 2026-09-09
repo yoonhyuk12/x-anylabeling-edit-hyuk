@@ -6140,6 +6140,7 @@ class LabelingWidget(LabelDialog):
             self.compare_view_manager.load_compare_for_file(self.filename)
 
         self._prefetch_neighbor_files()
+        self._remember_folder_position()
         return True
 
     def _prefetch_neighbor_files(self):
@@ -6300,6 +6301,62 @@ class LabelingWidget(LabelDialog):
 
     def load_recent_dir(self, dirpath):
         self.import_image_folder(dirpath)
+
+    # Per-folder resume position ------------------------------------------
+    _FOLDER_POSITIONS_KEY = "folder_last_files"
+    _FOLDER_POSITIONS_MAX = 200
+
+    @staticmethod
+    def _folder_position_key(dirpath):
+        return osp.normcase(osp.normpath(osp.abspath(str(dirpath))))
+
+    def _qsettings(self):
+        settings = getattr(self, "settings", None)
+        if settings is None:
+            settings = QtCore.QSettings("anylabeling", "anylabeling")
+        return settings
+
+    def _load_folder_positions(self):
+        raw = self._qsettings().value(self._FOLDER_POSITIONS_KEY, "")
+        if not raw:
+            return {}
+        try:
+            positions = json.loads(str(raw))
+        except (TypeError, ValueError):
+            return {}
+        return positions if isinstance(positions, dict) else {}
+
+    def _remember_folder_position(self):
+        """Store the current image as the resume point of the open folder."""
+        if not self.filename or not self.last_open_dir:
+            return
+        filename = str(self.filename)
+        if filename not in self.fn_to_index:
+            return
+        positions = self._load_folder_positions()
+        key = self._folder_position_key(self.last_open_dir)
+        positions.pop(key, None)
+        positions[key] = filename
+        while len(positions) > self._FOLDER_POSITIONS_MAX:
+            positions.pop(next(iter(positions)))
+        self._qsettings().setValue(
+            self._FOLDER_POSITIONS_KEY, json.dumps(positions)
+        )
+
+    def _remembered_folder_file(self, dirpath):
+        """Return the last viewed image of ``dirpath`` if it is still listed."""
+        remembered = self._load_folder_positions().get(
+            self._folder_position_key(dirpath)
+        )
+        if not remembered:
+            return None
+        if remembered in self.fn_to_index:
+            return remembered
+        wanted = osp.normcase(osp.normpath(remembered))
+        for filename in self.fn_to_index:
+            if osp.normcase(osp.normpath(filename)) == wanted:
+                return filename
+        return None
 
     def open_prev_unchecked_image(self):
         self._open_unchecked_image(-1)
@@ -6930,7 +6987,14 @@ class LabelingWidget(LabelDialog):
         self.actions.open_next_unchecked_image.setEnabled(True)
         self.actions.open_prev_unchecked_image.setEnabled(True)
         self.toggle_actions(True)
-        self.open_next_image(load=load)
+        resume_file = self._remembered_folder_file(dirpath)
+        if resume_file:
+            # Reopen the folder where the user left off last time.
+            self.filename = resume_file
+            if load:
+                self.load_file(resume_file)
+        else:
+            self.open_next_image(load=load)
 
         if image_files and self._config.get("exif_scan_enabled", True):
             self.async_exif_scanner.start_scan(image_files)

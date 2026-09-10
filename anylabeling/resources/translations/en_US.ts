@@ -3840,6 +3840,16 @@ Reset the label as {}.</translation>
       <translation>Copy File Name</translation>
     </message>
     <message>
+      <location filename="../../views/labeling/label_widget.py" line="652" />
+      <source>Copy Image Path</source>
+      <translation>Copy Image Path</translation>
+    </message>
+    <message>
+      <location filename="../../views/labeling/label_widget.py" line="656" />
+      <source>Copy the path of the current image to the clipboard</source>
+      <translation>Copy the path of the current image to the clipboard</translation>
+    </message>
+    <message>
       <location filename="../../views/labeling/label_widget.py" line="3910" />
       <source>Copy File Path</source>
       <translation>Copy File Path</translation>

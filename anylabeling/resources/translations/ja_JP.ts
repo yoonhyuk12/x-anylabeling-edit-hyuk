@@ -3855,6 +3855,16 @@ Reset the label as {}.</source>
       <translation>ファイル名をコピー</translation>
     </message>
     <message>
+      <location filename="../../views/labeling/label_widget.py" line="652" />
+      <source>Copy Image Path</source>
+      <translation>現在の画像のパスをコピー</translation>
+    </message>
+    <message>
+      <location filename="../../views/labeling/label_widget.py" line="656" />
+      <source>Copy the path of the current image to the clipboard</source>
+      <translation>現在の画像のパスをクリップボードにコピーします</translation>
+    </message>
+    <message>
       <location filename="../../views/labeling/label_widget.py" line="3910" />
       <source>Copy File Path</source>
       <translation>ファイルパスをコピー</translation>

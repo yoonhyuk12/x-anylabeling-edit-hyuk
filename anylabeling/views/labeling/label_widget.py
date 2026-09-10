@@ -648,6 +648,14 @@ class LabelingWidget(LabelDialog):
             self.tr("Delete current image file"),
             enabled=True,
         )
+        copy_image_path = action(
+            self.tr("Copy Image Path"),
+            self.copy_current_image_path,
+            shortcuts.get("copy_image_path"),
+            "copy",
+            self.tr("Copy the path of the current image to the clipboard"),
+            enabled=False,
+        )
         toggle_annotation_checked = action(
             self.tr("Mark as Checked"),
             self.set_annotation_checked,
@@ -1803,6 +1811,7 @@ class LabelingWidget(LabelDialog):
             toggle_compare_view=toggle_compare_view,
             delete_file=delete_file,
             delete_image_file=delete_image_file,
+            copy_image_path=copy_image_path,
             toggle_annotation_checked=toggle_annotation_checked,
             keep_prev_mode=keep_prev_mode,
             auto_use_last_label_mode=auto_use_last_label_mode,
@@ -1985,6 +1994,7 @@ class LabelingWidget(LabelDialog):
             ),
             on_load_active=(
                 close,
+                copy_image_path,
                 create_mode,
                 create_brush_polygon_mode,
                 create_magic_wand_mode,
@@ -2076,6 +2086,7 @@ class LabelingWidget(LabelDialog):
                 save_auto,
                 change_output_dir,
                 save_with_image_data,
+                copy_image_path,
                 close,
                 delete_file,
                 delete_image_file,
@@ -3920,6 +3931,19 @@ class LabelingWidget(LabelDialog):
             self.copy_file_path(osp.basename(item.text()))
         elif action == copy_path_action:
             self.copy_file_path(item.text())
+
+    def copy_current_image_path(self):
+        """Copy the path of the currently opened image to the clipboard.
+
+        Does nothing when no image is open. When a label file is the active
+        document, the path of the image it annotates is copied instead.
+        """
+        if not self.filename:
+            return
+        image_file = self.get_image_file()
+        if not image_file:
+            return
+        self.copy_file_path(osp.normpath(osp.abspath(image_file)))
 
     def copy_file_path(self, file_path):
         popup = Popup(

@@ -152,6 +152,7 @@ shortcuts:
   save_to: null
   delete_file: Ctrl+Delete
   delete_image_file: Ctrl+Shift+Delete
+  copy_image_path: Ctrl+Alt+P
 
   open_next: D
   open_prev: A

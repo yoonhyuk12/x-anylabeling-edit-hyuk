@@ -136,6 +136,10 @@ class Canvas(
         self.current = None
         self.selected_shapes = []  # save the selected shapes here
         self.selected_shapes_copy = []
+        self._selection_drag_start = None
+        self._selection_drag_end = None
+        self._selection_drag_base = []
+        self._keep_area_selection = False
         # self.line represents:
         #   - create_mode == 'polygon': edge from last point to current
         #   - create_mode == 'rectangle': diagonal line of the rectangle
@@ -537,6 +541,7 @@ class Canvas(
 
     def focusOutEvent(self, _):
         """Window out of focus event"""
+        self._clear_selection_drag()
         self._clear_space_pan_state()
         self.restore_cursor()
 
@@ -1528,6 +1533,7 @@ class Canvas(
 
     def set_editing(self, value=True):
         """Set editing mode. Editing is set to False, user is drawing"""
+        self._clear_selection_drag()
         self.mode = self.EDIT if value else self.CREATE
         if not value:  # Create
             self.un_highlight()
@@ -1975,6 +1981,13 @@ class Canvas(
             self._space_pan_suppress_until_release = False
         if self._space_pressed:
             self.override_cursor(CURSOR_GRAB)
+            ev.accept()
+            return
+
+        if self._selection_drag_start is not None:
+            self._selection_drag_end = pos
+            self.override_cursor(Qt.CursorShape.CrossCursor)
+            self.update()
             ev.accept()
             return
 
@@ -2468,7 +2481,7 @@ class Canvas(
                     CURSOR_DEFAULT if shape.locked else CURSOR_GRAB
                 )
                 # [Feature] Automatically highlight shape when the mouse is moved inside it
-                if self.h_shape_is_hovered:
+                if self.h_shape_is_hovered and not self._keep_area_selection:
                     group_mode = (
                         ev.modifiers()
                         == QtCore.Qt.KeyboardModifier.ControlModifier
@@ -2501,7 +2514,11 @@ class Canvas(
             self.override_cursor(CURSOR_DEFAULT)
             self.setToolTip("")
             self.setStatusTip("")
-            if self.h_shape_is_hovered and self.selected_shapes:
+            if (
+                self.h_shape_is_hovered
+                and self.selected_shapes
+                and not self._keep_area_selection
+            ):
                 self.deselect_shape()
         self.vertex_selected.emit(self.h_vertex is not None)
 
@@ -2783,6 +2800,31 @@ class Canvas(
                     self.repaint()
                     ev.accept()
                     return
+                if (
+                    self._has_valid_pixmap()
+                    and ev.modifiers()
+                    in (
+                        Qt.KeyboardModifier.NoModifier,
+                        Qt.KeyboardModifier.ControlModifier,
+                    )
+                    and not self._shape_hit_candidates(pos)
+                    and self._group_at_point(pos) is None
+                ):
+                    self._selection_drag_start = QtCore.QPointF(pos)
+                    self._selection_drag_end = QtCore.QPointF(pos)
+                    self._selection_drag_base = (
+                        list(self.selected_shapes)
+                        if ev.modifiers() == Qt.KeyboardModifier.ControlModifier
+                        else []
+                    )
+                    self.un_highlight()
+                    self.h_shape_is_selected = False
+                    self.is_move_editing = False
+                    self.vertex_selected.emit(False)
+                    self.override_cursor(Qt.CursorShape.CrossCursor)
+                    self.update()
+                    ev.accept()
+                    return
                 if self.selected_edge():
                     self.add_point_to_edge()
                 elif (
@@ -2843,6 +2885,14 @@ class Canvas(
     def mouseReleaseEvent(self, ev):
         """Mouse release event"""
         if self.is_loading:
+            return
+
+        if (
+            ev.button() == Qt.MouseButton.LeftButton
+            and self._selection_drag_start is not None
+        ):
+            self._finish_selection_drag(self.transform_pos(ev.position()))
+            ev.accept()
             return
 
         if ev.button() == QtCore.Qt.MouseButton.LeftButton and (
@@ -2979,8 +3029,39 @@ class Canvas(
                 self.current.pop_point()
                 self.finalise()
 
+    def _clear_selection_drag(self):
+        """Discard the temporary area selection rectangle."""
+        self._selection_drag_start = None
+        self._selection_drag_end = None
+        self._selection_drag_base = []
+        self.update()
+
+    def _finish_selection_drag(self, point):
+        """Select visible shapes intersecting the dragged image area."""
+        start = self._selection_drag_start
+        rect = QtCore.QRectF(start, point).normalized()
+        selected = list(self._selection_drag_base)
+        distance = (point - start).manhattanLength() * self.scale
+        if distance >= QtWidgets.QApplication.startDragDistance():
+            for shape in self.shapes:
+                if not self.is_visible(shape) or shape in selected:
+                    continue
+                path = shape.make_path()
+                if path.intersects(rect) or any(
+                    rect.contains(vertex) for vertex in shape.points
+                ):
+                    selected.append(shape)
+        self._clear_selection_drag()
+        self.select_shapes(selected)
+        self._keep_area_selection = bool(selected)
+        if selected:
+            self.prev_point = selected[0].bounding_rect().center()
+            self.calculate_offsets(self.prev_point)
+        self._restore_space_pan_cursor()
+
     def select_shapes(self, shapes):
         """Select some shapes"""
+        self._keep_area_selection = False
         self._selected_group_id = None
         self.set_hiding()
         self.selection_changed.emit(shapes)
@@ -2988,6 +3069,7 @@ class Canvas(
 
     def select_shape_point(self, point, multiple_selection_mode):  # noqa: C901
         """Select the first shape created which contains this point."""
+        self._keep_area_selection = False
         self._selected_group_id = None
         if self.selected_vertex():  # A vertex is marked for selection.
             index, shape = self.h_vertex, self.h_shape
@@ -3776,6 +3858,7 @@ class Canvas(
 
     def deselect_shape(self):
         """Deselect all shapes"""
+        self._keep_area_selection = False
         self._selected_group_id = None
         if self.selected_shapes:
             self.set_hiding(False)
@@ -4730,6 +4813,22 @@ class Canvas(
         # Brush-size preview circle follows the cursor in brush mode.
         self._paint_brush_cursor(p)
 
+        if self._selection_drag_start is not None:
+            p.save()
+            p.setOpacity(1.0)
+            color = QtGui.QColor(get_theme()["selection"])
+            pen = QtGui.QPen(color, 1.0, Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)
+            p.setPen(pen)
+            color.setAlpha(45)
+            p.setBrush(color)
+            p.drawRect(
+                QtCore.QRectF(
+                    self._selection_drag_start, self._selection_drag_end
+                ).normalized()
+            )
+            p.restore()
+
         p.end()
 
     def render_visualization(
@@ -5214,6 +5313,7 @@ class Canvas(
         modifiers = ev.modifiers()
         key = ev.key()
         if key == QtCore.Qt.Key.Key_Space and not ev.isAutoRepeat():
+            self._clear_selection_drag()
             self._space_pressed = True
             self._clear_space_pan_hover_state()
             if self._space_panning:
@@ -5252,6 +5352,8 @@ class Canvas(
                 self.snapping = False
         elif self.editing():
             if key == QtCore.Qt.Key.Key_Escape:
+                self._clear_selection_drag()
+                self._restore_space_pan_cursor()
                 self.deselect_shape()
                 return
             if (
@@ -5384,6 +5486,8 @@ class Canvas(
 
     def load_pixmap(self, pixmap, clear_shapes=True):
         """Load pixmap"""
+        self._clear_selection_drag()
+        self._keep_area_selection = False
         self.cancel_brush_mode()
         self._clear_magic_wand_preview()
         self._magic_wand_source = None
@@ -5394,6 +5498,8 @@ class Canvas(
 
     def load_shapes(self, shapes, replace=True):
         """Load shapes"""
+        self._clear_selection_drag()
+        self._keep_area_selection = False
         self.cancel_brush_mode()
         self._clear_magic_wand_preview()
         if replace:
@@ -5442,6 +5548,8 @@ class Canvas(
 
     def reset_state(self):
         """Clear shapes and pixmap"""
+        self._clear_selection_drag()
+        self._keep_area_selection = False
         self._clear_space_pan_state()
         self.restore_cursor()
         self.pixmap = None

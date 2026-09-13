@@ -170,3 +170,170 @@ class TestCanvasShapeSelection(unittest.TestCase):
         candidates = self.canvas._shape_hit_candidates(QtCore.QPointF(60, 60))
 
         self.assertEqual(candidates, [outer])
+
+    @staticmethod
+    def make_polygon(label, points):
+        shape = Shape(label=label, shape_type="polygon")
+        shape.points = [QtCore.QPointF(x, y) for x, y in points]
+        shape.close()
+        return shape
+
+    def _drag_area(self, start, end, additive=False):
+        modifiers = (
+            QtCore.Qt.KeyboardModifier.ControlModifier
+            if additive
+            else QtCore.Qt.KeyboardModifier.NoModifier
+        )
+        QtTest.QTest.mousePress(
+            self.canvas,
+            QtCore.Qt.MouseButton.LeftButton,
+            modifiers,
+            QtCore.QPoint(*start),
+        )
+        point = QtCore.QPointF(*end)
+        self.canvas.mouseMoveEvent(
+            QtGui.QMouseEvent(
+                QtCore.QEvent.Type.MouseMove,
+                point,
+                point,
+                QtCore.Qt.MouseButton.NoButton,
+                QtCore.Qt.MouseButton.LeftButton,
+                modifiers,
+            )
+        )
+        QtTest.QTest.mouseRelease(
+            self.canvas,
+            QtCore.Qt.MouseButton.LeftButton,
+            modifiers,
+            QtCore.QPoint(*end),
+        )
+
+    def test_area_drag_selects_intersecting_polygons_without_moving(self):
+        inside = self.make_polygon("inside", [(30, 30), (60, 30), (45, 60)])
+        crossing = self.make_polygon(
+            "crossing", [(80, 80), (150, 80), (150, 150)]
+        )
+        outside = self.make_polygon(
+            "outside", [(140, 140), (180, 140), (180, 180)]
+        )
+        hidden = self.make_polygon("hidden", [(40, 40), (70, 40), (55, 70)])
+        self.canvas.shapes = [inside, crossing, outside, hidden]
+        self.canvas.visible[hidden] = False
+        before = [list(shape.points) for shape in self.canvas.shapes]
+        with mock.patch.object(self.canvas, "scroll_request") as scroll:
+            self._drag_area((10, 10), (100, 100))
+
+        self.assertEqual(self.canvas.selected_shapes, [inside, crossing])
+        self.assertEqual([s.points for s in self.canvas.shapes], before)
+        self.assertFalse(self.canvas.moving_shape)
+        scroll.emit.assert_not_called()
+
+    def test_area_drag_uses_polygon_geometry_instead_of_bounding_box(self):
+        triangle = self.make_polygon(
+            "triangle", [(20, 20), (160, 20), (20, 160)]
+        )
+        self.canvas.shapes = [triangle]
+        self._drag_area((170, 170), (120, 120))
+        self.assertEqual(self.canvas.selected_shapes, [])
+
+    def test_reverse_area_drag_adds_to_existing_selection(self):
+        first = self.make_polygon("first", [(30, 30), (60, 30), (45, 60)])
+        second = self.make_polygon(
+            "second", [(110, 110), (140, 110), (125, 140)]
+        )
+        self.canvas.shapes = [first, second]
+        self._set_selection([first])
+        self._drag_area((160, 160), (90, 90), additive=True)
+        self.assertEqual(self.canvas.selected_shapes, [first, second])
+
+    def test_area_drag_replaces_selection_and_survives_auto_highlight(self):
+        first = self.make_polygon("first", [(30, 30), (60, 30), (45, 60)])
+        second = self.make_polygon(
+            "second", [(110, 110), (140, 110), (125, 140)]
+        )
+        self.canvas.shapes = [first, second]
+        self.canvas.h_shape_is_hovered = True
+        self._set_selection([second])
+        self._drag_area((10, 10), (80, 80))
+        self._move_mouse(190, 190)
+        self._move_mouse(125, 120)
+        self.assertEqual(self.canvas.selected_shapes, [first])
+
+    def test_click_on_empty_space_clears_selection_unless_ctrl_pressed(self):
+        shape = self.make_polygon("shape", [(30, 30), (60, 30), (45, 60)])
+        self.canvas.shapes = [shape]
+        self._set_selection([shape])
+        self._drag_area((180, 180), (181, 181), additive=True)
+        self.assertEqual(self.canvas.selected_shapes, [shape])
+        self._drag_area((180, 180), (181, 181))
+        self.assertEqual(self.canvas.selected_shapes, [])
+
+    def test_area_drag_accounts_for_zoom_and_center_offset(self):
+        shape = self.make_polygon("shape", [(30, 30), (60, 30), (45, 60)])
+        self.canvas.shapes = [shape]
+        self.canvas.scale = 2.0
+        self.canvas.resize(600, 600)
+        offset = self.canvas.offset_to_center()
+        start = (QtCore.QPointF(10, 10) + offset) * self.canvas.scale
+        end = (QtCore.QPointF(80, 80) + offset) * self.canvas.scale
+        self._drag_area(
+            (int(start.x()), int(start.y())), (int(end.x()), int(end.y()))
+        )
+        self.assertEqual(self.canvas.selected_shapes, [shape])
+
+    def test_escape_cancels_area_selection(self):
+        shape = self.make_polygon("shape", [(30, 30), (60, 30), (45, 60)])
+        self.canvas.shapes = [shape]
+        QtTest.QTest.mousePress(
+            self.canvas,
+            QtCore.Qt.MouseButton.LeftButton,
+            pos=QtCore.QPoint(10, 10),
+        )
+        QtTest.QTest.keyClick(self.canvas, QtCore.Qt.Key.Key_Escape)
+        QtTest.QTest.mouseRelease(
+            self.canvas,
+            QtCore.Qt.MouseButton.LeftButton,
+            pos=QtCore.QPoint(80, 80),
+        )
+        self.assertEqual(self.canvas.selected_shapes, [])
+        self.assertIsNone(self.canvas._selection_drag_start)
+
+    def test_space_drag_still_pans(self):
+        QtTest.QTest.keyPress(self.canvas, QtCore.Qt.Key.Key_Space)
+        with mock.patch.object(self.canvas, "scroll_request") as scroll:
+            self._drag_area((10, 10), (80, 80))
+        QtTest.QTest.keyRelease(self.canvas, QtCore.Qt.Key.Key_Space)
+        self.assertTrue(scroll.emit.called)
+        self.assertEqual(self.canvas.selected_shapes, [])
+
+    def test_area_selection_can_move_left_by_keyboard_and_respects_locks(self):
+        movable = self.make_polygon("movable", [(30, 30), (60, 30), (45, 60)])
+        locked = self.make_polygon("locked", [(70, 30), (90, 30), (80, 60)])
+        locked.locked = True
+        self.canvas.shapes = [movable, locked]
+        self._drag_area((10, 10), (110, 80))
+        self.assertEqual(self.canvas.selected_shapes, [movable, locked])
+        QtTest.QTest.keyClick(self.canvas, QtCore.Qt.Key.Key_Left)
+        self.assertEqual(movable.points[0], QtCore.QPointF(29, 30))
+        self.assertEqual(locked.points[0], QtCore.QPointF(70, 30))
+
+    def test_area_selection_rectangle_is_painted_and_cleared_on_release(self):
+        self.canvas.cross_line_show = False
+        self.canvas.show()
+        self.app.processEvents()
+        self._move_mouse(100, 100)
+        QtTest.QTest.mousePress(
+            self.canvas,
+            QtCore.Qt.MouseButton.LeftButton,
+            pos=QtCore.QPoint(10, 10),
+        )
+        self._move_mouse(100, 100)
+        preview = self.canvas.grab().toImage()
+        self.assertNotEqual(preview.pixelColor(50, 50), QtGui.QColor("black"))
+        QtTest.QTest.mouseRelease(
+            self.canvas,
+            QtCore.Qt.MouseButton.LeftButton,
+            pos=QtCore.QPoint(100, 100),
+        )
+        finished = self.canvas.grab().toImage()
+        self.assertEqual(finished.pixelColor(50, 50), QtGui.QColor("black"))

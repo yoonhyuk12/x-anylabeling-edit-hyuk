@@ -1,0 +1,9 @@
+type: gemma4_ollama
+name: gemma4_ollama-r20260425
+provider: Google (Local)
+display_name: Gemma 4 (Local via Ollama)
+model_name: gemma4:26b
+ollama_endpoint: http://localhost:11434
+conf_threshold: 0.25
+iou_threshold: 0.80
+request_timeout_seconds: 300

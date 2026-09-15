@@ -280,6 +280,7 @@ SETTINGS_GENERAL_KEYS = (
     "exif_scan_enabled",
     "fast_folder_loading",
     "image_prefetch_count",
+    "image_prefetch_cache_mb",
     "file_list_checkbox_editable",
     "system_clipboard",
     "font_family",
@@ -570,13 +571,32 @@ def _non_shortcut_fields() -> list[SettingField]:
             "File List",
             "Navigation",
             minimum=0,
-            maximum=20,
+            maximum=100,
             description=QT_TRANSLATE_NOOP(
                 SETTINGS_TRANSLATION_CONTEXT,
                 "Read upcoming images and labels in the background to reduce "
                 "navigation delays on network drives. Use 0 to disable. "
-                "More images use more bandwidth; the cache is limited to "
-                "128 MB. Applies immediately.",
+                "More images use more bandwidth and need a larger read-ahead "
+                "cache. Applies immediately.",
+            ),
+        ),
+        SettingField(
+            "image_prefetch_cache_mb",
+            QT_TRANSLATE_NOOP(
+                SETTINGS_TRANSLATION_CONTEXT, "Read-Ahead Cache Size (MB)"
+            ),
+            "int",
+            "General",
+            "File List",
+            "Navigation",
+            minimum=64,
+            maximum=4096,
+            single_step=64,
+            description=QT_TRANSLATE_NOOP(
+                SETTINGS_TRANSLATION_CONTEXT,
+                "Memory reserved for images and labels read ahead. Raise it "
+                "when large images are read ahead many at a time. Applies "
+                "immediately.",
             ),
         ),
         SettingField(

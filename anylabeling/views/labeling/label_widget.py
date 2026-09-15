@@ -208,7 +208,9 @@ class LabelingWidget(LabelDialog):
         self._settings_controller = None
         self._settings_dialog = None
         self.training_dialog = None
-        self._file_prefetcher = FilePrefetchCache()
+        self._file_prefetcher = FilePrefetchCache(
+            max_bytes=self._prefetch_cache_bytes()
+        )
         self._settings_runtime_applier = SettingsRuntimeApplier(self)
         self._auto_switch_signal_connected = False
 
@@ -465,6 +467,26 @@ class LabelingWidget(LabelDialog):
         )
         # Hidden until an image is loaded (shown at the end of load_file).
         self.canvas_adjustment.hide()
+
+        # Read-ahead progress pinned to the top-right of the canvas viewport.
+        self.prefetch_indicator = QtWidgets.QLabel(scroll_area.viewport())
+        self.prefetch_indicator.setObjectName("prefetchIndicator")
+        self.prefetch_indicator.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self.prefetch_indicator.setStyleSheet(
+            "QLabel#prefetchIndicator {"
+            " background-color: rgba(0, 0, 0, 140); color: #d0d0d0;"
+            " border-radius: 6px; padding: 3px 8px; font-size: 12px; }"
+            'QLabel#prefetchIndicator[complete="true"] { color: #7ee787; }'
+        )
+        self.prefetch_indicator.hide()
+        self._prefetch_ahead_images = []
+        self._prefetch_indicator_timer = QtCore.QTimer(self)
+        self._prefetch_indicator_timer.setInterval(250)
+        self._prefetch_indicator_timer.timeout.connect(
+            self._update_prefetch_indicator
+        )
         scroll_area.viewport().installEventFilter(self)
 
         self.scroll_bars = {
@@ -3087,6 +3109,9 @@ class LabelingWidget(LabelDialog):
         self.brightness_contrast_processor.clear_image()
         if hasattr(self, "canvas_adjustment"):
             self.canvas_adjustment.hide()
+        if hasattr(self, "prefetch_indicator"):
+            self._prefetch_ahead_images = []
+            self._update_prefetch_indicator()
         self.compare_view_manager.reset()
         self.label_filter_combobox.text_box.clear()
         self.gid_filter_combobox.gid_box.clear()
@@ -5865,6 +5890,46 @@ class LabelingWidget(LabelDialog):
         )
         self.canvas_adjustment.raise_()
 
+    def _position_prefetch_indicator(self):
+        """Keep the read-ahead indicator pinned to the top-right corner."""
+        if not hasattr(self, "prefetch_indicator"):
+            return
+        viewport = self._canvas_scroll_area.viewport()
+        self.prefetch_indicator.adjustSize()
+        margin = 10
+        width = self.prefetch_indicator.width()
+        self.prefetch_indicator.move(
+            max(0, viewport.width() - width - margin), margin
+        )
+        self.prefetch_indicator.raise_()
+
+    def _update_prefetch_indicator(self):
+        """Show how many upcoming images are already read into memory."""
+        ahead = self._prefetch_ahead_images
+        if not ahead:
+            self._prefetch_indicator_timer.stop()
+            self.prefetch_indicator.hide()
+            return
+        ready = sum(
+            1 for path in ahead if self._file_prefetcher.is_cached(path)
+        )
+        total = len(ahead)
+        complete = ready >= total
+        self.prefetch_indicator.setText(
+            self.tr("Read ahead %d / %d") % (ready, total)
+        )
+        if self.prefetch_indicator.property("complete") != complete:
+            self.prefetch_indicator.setProperty("complete", complete)
+            style = self.prefetch_indicator.style()
+            style.unpolish(self.prefetch_indicator)
+            style.polish(self.prefetch_indicator)
+        self._position_prefetch_indicator()
+        self.prefetch_indicator.show()
+        if complete or self._file_prefetcher.is_idle():
+            self._prefetch_indicator_timer.stop()
+        elif not self._prefetch_indicator_timer.isActive():
+            self._prefetch_indicator_timer.start()
+
     def eventFilter(self, obj, event):
         if (
             hasattr(self, "_canvas_scroll_area")
@@ -5872,6 +5937,7 @@ class LabelingWidget(LabelDialog):
             and event.type() == QtCore.QEvent.Type.Resize
         ):
             self._position_canvas_adjustment()
+            self._position_prefetch_indicator()
         return super().eventFilter(obj, event)
 
     def hide_selected_polygons(self):
@@ -5969,7 +6035,7 @@ class LabelingWidget(LabelDialog):
         filename = str(filename)
         read_file = (
             self._file_prefetcher.read
-            if self._config.get("image_prefetch_count", 5) > 0
+            if self._prefetch_count() > 0
             else None
         )
         if not QtCore.QFile.exists(filename):
@@ -6167,11 +6233,32 @@ class LabelingWidget(LabelDialog):
         self._remember_folder_position()
         return True
 
+    _PREFETCH_COUNT_MAX = 100
+    _PREFETCH_CACHE_MB_MIN = 64
+    _PREFETCH_CACHE_MB_MAX = 4096
+
+    def _prefetch_count(self):
+        count = self._config.get("image_prefetch_count", 20)
+        return max(0, min(self._PREFETCH_COUNT_MAX, int(count or 0)))
+
+    def _prefetch_cache_bytes(self):
+        size_mb = self._config.get("image_prefetch_cache_mb", 512) or 512
+        size_mb = max(
+            self._PREFETCH_CACHE_MB_MIN,
+            min(self._PREFETCH_CACHE_MB_MAX, int(size_mb)),
+        )
+        return size_mb * 1024 * 1024
+
+    def apply_prefetch_cache_size(self):
+        self._file_prefetcher.set_max_bytes(self._prefetch_cache_bytes())
+
     def _prefetch_neighbor_files(self):
-        count = max(0, min(20, self._config.get("image_prefetch_count", 5)))
+        count = self._prefetch_count()
         index = self.fn_to_index.get(str(self.filename))
         if not count or index is None:
             self._file_prefetcher.clear()
+            self._prefetch_ahead_images = []
+            self._update_prefetch_indicator()
             return
         # Read the nearest next image/label first; keep two previous images
         # and the current one for short backward/forward navigation.
@@ -6184,6 +6271,11 @@ class LabelingWidget(LabelDialog):
             path = self.file_list_widget.item(neighbor).text()
             paths.extend((path, label_path(path, self.output_dir)))
         self._file_prefetcher.prefetch(paths)
+        self._prefetch_ahead_images = [
+            self.file_list_widget.item(neighbor).text()
+            for neighbor in range(index + 1, min(total, index + count + 1))
+        ]
+        self._update_prefetch_indicator()
 
     # QT Overload
     def keyPressEvent(self, event):
@@ -6208,6 +6300,7 @@ class LabelingWidget(LabelDialog):
             self.adjust_scale()
         self.update_thumbnail_pixmap()
         self._position_canvas_adjustment()
+        self._position_prefetch_indicator()
 
     def paint_canvas(self):
         if self.image.isNull():

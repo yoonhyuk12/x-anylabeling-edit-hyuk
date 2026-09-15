@@ -220,17 +220,27 @@ class TestSettingsDialogLayout(unittest.TestCase):
         spinbox = dialog._field_rows["image_prefetch_count"].findChild(
             QtWidgets.QSpinBox
         )
-        self.assertEqual(spinbox.value(), 5)
-        self.assertEqual((spinbox.minimum(), spinbox.maximum()), (0, 20))
+        self.assertEqual(spinbox.value(), 20)
+        self.assertEqual((spinbox.minimum(), spinbox.maximum()), (0, 100))
         spinbox.setValue(0)
+        cache_spinbox = dialog._field_rows["image_prefetch_cache_mb"].findChild(
+            QtWidgets.QSpinBox
+        )
+        self.assertEqual(cache_spinbox.value(), 512)
+        self.assertEqual(
+            (cache_spinbox.minimum(), cache_spinbox.maximum()), (64, 4096)
+        )
+        cache_spinbox.setValue(1024)
         controller = dialog._controller
         controller.save_now()
         self.assertEqual(controller._config["image_prefetch_count"], 0)
+        self.assertEqual(controller._config["image_prefetch_cache_mb"], 1024)
         restored = SettingsController(
             config=copy.deepcopy(controller._config),
             save_callback=lambda _config: True,
         )
         self.assertEqual(restored.get_value("image_prefetch_count"), 0)
+        self.assertEqual(restored.get_value("image_prefetch_cache_mb"), 1024)
 
     def test_fast_folder_loading_checkbox_saves_and_restores(self):
         dialog = self._create_dialog()

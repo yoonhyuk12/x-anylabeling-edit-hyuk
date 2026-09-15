@@ -16,7 +16,8 @@ auto_highlight_shape: true
 auto_switch_to_edit_mode: true
 exif_scan_enabled: true
 fast_folder_loading: true
-image_prefetch_count: 5
+image_prefetch_count: 20
+image_prefetch_cache_mb: 512
 show_groups: false
 show_masks: true
 show_texts: true

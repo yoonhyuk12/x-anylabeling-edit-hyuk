@@ -67,6 +67,8 @@ def wait_prefetch(widget):
 
 def test_next_and_previous_actions_use_prefetched_images_and_labels(navigation):
     app, widget, folder = navigation
+    widget._config["image_prefetch_count"] = 5
+    widget._prefetch_neighbor_files()
     wait_prefetch(widget)
     assert widget.filename == str(folder / "image-0.png")
     original_read = file_prefetch.open_file
@@ -124,3 +126,63 @@ def test_read_ahead_setting_applies_immediately_and_can_be_disabled(navigation):
             "image-0.png", "image-0.json",
         )
     ]
+
+
+def test_read_ahead_cache_size_setting_applies_immediately(navigation):
+    _, widget, _ = navigation
+    wait_prefetch(widget)
+    assert widget._file_prefetcher.max_bytes == 512 * 1024 * 1024
+    widget._config["image_prefetch_cache_mb"] = 64
+    widget._settings_runtime_applier.apply_change(
+        "image_prefetch_cache_mb", 64
+    )
+    assert widget._file_prefetcher.max_bytes == 64 * 1024 * 1024
+    assert widget._file_prefetcher.cached_bytes > 0
+
+
+def test_read_ahead_window_defaults_to_twenty_and_is_capped_at_hundred(
+    navigation,
+):
+    _, widget, folder = navigation
+    wait_prefetch(widget)
+    assert widget._config["image_prefetch_count"] == 20
+    widget._config["image_prefetch_count"] = 1000
+    with mock.patch.object(widget._file_prefetcher, "prefetch") as prefetch:
+        widget._settings_runtime_applier.apply_change(
+            "image_prefetch_count", 1000
+        )
+    paths = prefetch.call_args.args[0]
+    # Seven images: six neighbours plus the current one, image and json each.
+    assert len(paths) == 14
+    assert paths[0] == str(folder / "image-1.png")
+
+
+def test_read_ahead_indicator_shows_progress_in_top_right_corner(navigation):
+    app, widget, _ = navigation
+    wait_prefetch(widget)
+    widget._update_prefetch_indicator()
+    app.processEvents()
+    indicator = widget.prefetch_indicator
+    assert indicator.isVisible()
+    # Six images follow image-0, and all of them are already in memory.
+    assert indicator.text() == "Read ahead 6 / 6"
+    assert indicator.property("complete") is True
+    viewport = widget._canvas_scroll_area.viewport()
+    assert indicator.x() + indicator.width() == viewport.width() - 10
+    assert indicator.y() == 10
+    widget._config["image_prefetch_count"] = 0
+    widget._settings_runtime_applier.apply_change("image_prefetch_count", 0)
+    app.processEvents()
+    assert not indicator.isVisible()
+
+
+def test_read_ahead_indicator_counts_only_finished_reads(navigation):
+    app, widget, folder = navigation
+    wait_prefetch(widget)
+    cache = widget._file_prefetcher
+    cache.clear()
+    only_first = lambda path: path.endswith("image-1.png")  # noqa: E731
+    with mock.patch.object(cache, "is_cached", side_effect=only_first):
+        widget._update_prefetch_indicator()
+    assert widget.prefetch_indicator.text() == "Read ahead 1 / 6"
+    assert widget.prefetch_indicator.property("complete") is False

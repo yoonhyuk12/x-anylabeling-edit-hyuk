@@ -25,10 +25,10 @@ def wait_idle(cache):
         ), "background reads did not finish"
 
 
-def test_prefetch_reads_two_files_concurrently_and_reuses_bytes(
+def test_prefetch_reads_four_files_concurrently_and_reuses_bytes(
     cache, tmp_path, monkeypatch
 ):
-    files = [tmp_path / f"image-{i}.jpg" for i in range(3)]
+    files = [tmp_path / f"image-{i}.jpg" for i in range(5)]
     for path in files:
         path.write_bytes(path.name.encode())
     both_started = threading.Event()
@@ -40,7 +40,7 @@ def test_prefetch_reads_two_files_concurrently_and_reuses_bytes(
     def slow_open(*args, **kwargs):
         with lock:
             readers.append(threading.get_ident())
-            if len(readers) == 2:
+            if len(readers) == 4:
                 both_started.set()
         assert release.wait(5)
         return real_open(*args, **kwargs)
@@ -50,7 +50,7 @@ def test_prefetch_reads_two_files_concurrently_and_reuses_bytes(
     try:
         assert both_started.wait(3)
         assert threading.get_ident() not in readers
-        assert len(readers) == 2  # The third read is queued, not another worker.
+        assert len(readers) == 4  # The fifth read waits for a worker.
     finally:
         release.set()
     wait_idle(cache)
@@ -117,6 +117,47 @@ def test_missing_annotation_can_be_created_after_prefetch(cache, tmp_path):
     wait_idle(cache)
     path.write_bytes(b"created")
     assert cache.read(path) == b"created"
+
+
+def test_default_budget_holds_a_long_read_ahead_window(cache):
+    assert cache.max_bytes == 512 * 1024 * 1024
+
+
+def test_shrinking_budget_evicts_farthest_files_first(tmp_path):
+    files = [tmp_path / f"image-{i}.jpg" for i in range(4)]
+    for path in files:
+        path.write_bytes(b"1234")
+    cache = FilePrefetchCache(max_bytes=16, workers=1)
+    try:
+        cache.prefetch(files)
+        wait_idle(cache)
+        assert cache.cached_bytes == 16
+        cache.set_max_bytes(8)
+        assert cache.max_bytes == 8
+        assert cache.cached_bytes == 8
+        with mock.patch.object(
+            file_prefetch, "open_file", side_effect=AssertionError("reread")
+        ):
+            assert cache.read(files[0]) == b"1234"
+            assert cache.read(files[1]) == b"1234"
+        cache.set_max_bytes(16)
+        cache.prefetch(files)
+        wait_idle(cache)
+        assert cache.cached_bytes == 16
+    finally:
+        cache.close()
+
+
+def test_is_cached_reports_only_files_held_in_memory(cache, tmp_path):
+    path = tmp_path / "image.jpg"
+    path.write_bytes(b"image")
+    assert not cache.is_cached(path)
+    cache.prefetch([path])
+    wait_idle(cache)
+    assert cache.is_cached(path)
+    assert cache.is_idle()
+    cache.clear()
+    assert not cache.is_cached(path)
 
 
 def test_budget_preserves_nearest_file_and_skips_oversized_prefetch(tmp_path):

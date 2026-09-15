@@ -33,7 +33,10 @@ class FilePrefetchCache:
     waiting for a disconnected drive. Qt objects never enter these workers.
     """
 
-    def __init__(self, max_bytes=128 * 1024 * 1024, workers=2):
+    DEFAULT_MAX_BYTES = 512 * 1024 * 1024
+    DEFAULT_WORKERS = 4
+
+    def __init__(self, max_bytes=DEFAULT_MAX_BYTES, workers=DEFAULT_WORKERS):
         self.max_bytes = max_bytes
         self._worker_count = workers
         self._condition = Condition()
@@ -54,6 +57,22 @@ class FilePrefetchCache:
     def cached_bytes(self):
         with self._condition:
             return self._bytes
+
+    def is_cached(self, path):
+        """Report whether a file's bytes are held in memory right now."""
+        with self._condition:
+            return self._key(path) in self._cache
+
+    def is_idle(self):
+        """Report whether no speculative or shared read is in progress."""
+        with self._condition:
+            return not self._pending and not self._inflight
+
+    def set_max_bytes(self, max_bytes):
+        """Resize the budget, evicting the farthest files when it shrinks."""
+        with self._condition:
+            self.max_bytes = max(0, int(max_bytes))
+            self._evict_over_budget()
 
     def prefetch(self, paths):
         """Replace queued work with paths ordered from nearest to farthest."""
@@ -144,6 +163,9 @@ class FilePrefetchCache:
         self._remove(key)
         self._cache[key] = snapshot
         self._bytes += len(snapshot.data)
+        self._evict_over_budget()
+
+    def _evict_over_budget(self):
         while self._bytes > self.max_bytes:
             # Preserve the next image when distant, large files fill the cache.
             farthest = max(

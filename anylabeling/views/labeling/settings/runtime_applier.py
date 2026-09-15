@@ -272,6 +272,9 @@ class SettingsRuntimeApplier:
         if key == "image_prefetch_count":
             self._widget._prefetch_neighbor_files()
             return
+        if key == "image_prefetch_cache_mb":
+            self._widget.apply_prefetch_cache_size()
+            return
         if key in {
             "display_label_popup",
             "auto_highlight_shape",

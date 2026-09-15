@@ -24,14 +24,14 @@ except Exception:
 class TestSettingsSchema(unittest.TestCase):
 
     def test_field_count(self):
-        self.assertEqual(len(SETTING_FIELDS), 136)
+        self.assertEqual(len(SETTING_FIELDS), 138)
 
     def test_shortcut_and_non_shortcut_count(self):
         shortcut_fields = [
             field for field in SETTING_FIELDS if field.primary == "Shortcuts"
         ]
-        self.assertEqual(len(shortcut_fields), 79)
-        self.assertEqual(len(SETTING_FIELDS) - len(shortcut_fields), 57)
+        self.assertEqual(len(shortcut_fields), 80)
+        self.assertEqual(len(SETTING_FIELDS) - len(shortcut_fields), 58)
 
     def test_defaults_cover_all_keys(self):
         defaults = defaults_map()
@@ -43,6 +43,7 @@ class TestSettingsSchema(unittest.TestCase):
             "auto_switch_to_edit_mode",
             "fast_folder_loading",
             "image_prefetch_count",
+            "image_prefetch_cache_mb",
             "system_clipboard",
             "font_family",
             "shape.line_color",
@@ -82,7 +83,7 @@ class TestSettingsSchema(unittest.TestCase):
             SETTINGS_PRIMARY_ORDER,
             ("Shortcuts", "General", "Shape", "Canvas"),
         )
-        self.assertEqual(len(SETTINGS_GENERAL_KEYS), 11)
+        self.assertEqual(len(SETTINGS_GENERAL_KEYS), 12)
         self.assertEqual(len(SETTINGS_SHAPE_KEYS), 9)
         self.assertEqual(len(SETTINGS_SHORTCUT_KEYS_CORE), 24)
         for key in SETTINGS_GENERAL_KEYS:
@@ -110,7 +111,7 @@ class TestSettingsSchema(unittest.TestCase):
         self.assertIn("shape.line_width", shape_keys)
         self.assertEqual(
             len(shortcut_fields),
-            79,
+            80,
         )
         for key in SETTINGS_SHORTCUT_KEYS_CORE:
             self.assertIn(key, [field.key for field in shortcut_fields])

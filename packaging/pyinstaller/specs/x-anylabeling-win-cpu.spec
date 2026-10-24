@@ -170,6 +170,7 @@ a = Analysis(
     pathex=[_p('anylabeling')],
     binaries=onnxruntime_binaries,
     datas=[
+        (_p('anylabeling', 'services', 'auto_labeling', 'osam', 'clip', 'bpe_simple_vocab_16e6.txt.gz'), 'anylabeling/services/auto_labeling/osam/clip'),
         (_p('anylabeling', 'configs', 'auto_labeling', '*.yaml'), 'anylabeling/configs/auto_labeling'),
         (_p('anylabeling', 'configs', '*.yaml'), 'anylabeling/configs'),
         (_p('anylabeling', 'services', 'auto_training', 'ultralytics', 'worker.py'), 'anylabeling/services/auto_training/ultralytics'),
@@ -193,24 +194,47 @@ a.binaries = _strip_msvc_runtime_binaries(a.binaries)
 if msvc_runtime_binaries:
     a.binaries += _to_binary_toc_entries(msvc_runtime_binaries)
 pyz = PYZ(a.pure, a.zipped_data)
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    name=f'X-AnyLabeling-v{__version__}-CPU',
-    debug=False,
-    strip=False,
-    upx=False,
-    runtime_tmpdir=None,
-    console=False,
-    icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
-)
-app = BUNDLE(
-    exe,
-    name='X-AnyLabeling.app',
-    icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
-    bundle_identifier=None,
-    info_plist={'NSHighResolutionCapable': 'True'},
-)
+if os.environ.get('X_ANYLABELING_PACKAGE_MODE') == 'onedir':
+    exe = EXE(
+        pyz,
+        a.scripts,
+        exclude_binaries=True,
+        contents_directory=__version__,
+        name='X-AnyLabeling',
+        debug=False,
+        strip=False,
+        upx=False,
+        console=False,
+        icon=_p('anylabeling', 'resources', 'images', 'icon.ico'),
+    )
+    app = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        name='X-AnyLabeling',
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        name=f'X-AnyLabeling-v{__version__}-CPU',
+        debug=False,
+        strip=False,
+        upx=False,
+        runtime_tmpdir=None,
+        console=False,
+        icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
+    )
+    app = BUNDLE(
+        exe,
+        name='X-AnyLabeling.app',
+        icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
+        bundle_identifier=None,
+        info_plist={'NSHighResolutionCapable': 'True'},
+    )

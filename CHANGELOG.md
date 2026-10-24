@@ -1,5 +1,129 @@
 # X-AnyLabeling Changelog
 
+## `v4.2.0` (Oct 18, 2026)
+
+X-AnyLabeling 4.2.0 adds PCD point cloud support and expands remote grounding model workflows.
+
+### 🚀 New Features
+
+- Add PCD v0.5/v0.7 point cloud loading with ASCII, binary, and binary-compressed data, including optional intensity and packed RGB/RGBA colors. (#1468)
+
+### 🐛 Bug Fixes
+
+- Widen the About dialog so the copyright text is fully visible.
+
+### 🛠️ Improvements
+
+- Support PCD inputs in point cloud export workflows. (#1468)
+- Add Remote-Server setup guides and examples for GroundingPI, GroundAnything, and GroundAnything-VLM, covering detection, grounding, pointing, object points, OCR, document layout, GUI grounding, and visual prompting.
+
+### 🌟 Contributors
+
+A total of 1 developer contributed to this release.
+
+Thank @CVHub520
+
+## `v4.1.3` (Oct 16, 2026)
+
+X-AnyLabeling 4.1.3 improves automatic updates and release packaging while fixing prompt interaction state handling.
+
+### 🚀 New Features
+
+- Reuse published release packages for automatic updates.
+- Reuse macOS disk images for automatic updates.
+
+### 🐛 Bug Fixes
+
+- Reset prompt interaction state when switching auto-labeling models.
+- Include the CLIP BPE vocabulary in Python distributions and executable builds.
+
+### 🛠️ Improvements
+
+- Stop uploading Linux portable tarballs from release workflows.
+
+### 🌟 Contributors
+
+A total of 1 developer contributed to this release.
+
+Thank @CVHub520
+
+## `v4.1.2` (Oct 15, 2026)
+
+X-AnyLabeling 4.1.2 fixes annotation loading and saving issues and simplifies release downloads.
+
+### 🐛 Bug Fixes
+
+- Preserve shape color settings when switching images. (#1465)
+- Resolve image paths correctly when loading annotations. (#1462)
+- Initialize missing label files with the standard schema during chatbot batch saving. (#1461)
+
+### 🛠️ Improvements
+
+- Distribute Windows installers and in-app update packages without standalone executables or portable archives.
+- Consolidate release checksums into a single SHA256SUMS.txt file.
+- Keep Python wheel and source distributions on PyPI instead of duplicating them in GitHub release assets.
+
+### 🌟 Contributors
+
+A total of 2 developers contributed to this release.
+
+Thank @BatmannLv, @CVHub520
+
+## `v4.1.1` (Oct 13, 2026)
+
+X-AnyLabeling 4.1.1 adds installation packages and signed in-app updates while preserving the existing update workflow for source checkouts and single-file builds.
+
+### 🚀 New Features
+
+- Add Windows installers, Linux installation bundles, and macOS DMG packages.
+- Add signed update manifests, verified downloads, update progress, and automatic restart with rollback on startup failure.
+- Connect Check for Updates to the in-app updater for supported installations and add Chinese, Japanese, and Korean translations.
+
+### 🛠️ Improvements
+
+- Validate Qt XCB dependencies before running graphical release tests.
+- List point cloud annotation first in the workflow documentation.
+
+### 🌟 Contributors
+
+A total of 1 developer contributed to this release.
+
+Thank @CVHub520
+
+## `v4.1.0` (Oct 01, 2026)
+
+X-AnyLabeling 4.1.0 introduces a dedicated 3D point cloud annotation workspace, expands classification workflows, and improves everyday annotation and model management.
+
+### 🚀 New Features
+
+- Add 3D point cloud semantic and instance segmentation with brush and polygon selection, class and instance management, automatic saving, and calibrated camera projection. (#162)
+- Add 3D object detection annotation with editable cuboids, top/side/front views, multi-camera support, and dataset import and export workflows.
+- Integrate classification model predictions as image flags and add searchable categories to the image classifier. (#1457)
+- Add a collapsible sidebar with bounded resizing. (#1357)
+- Add a localized, searchable keyboard shortcuts dialog.
+- Allow downloaded model files to be deleted from the model dropdown with localized confirmation dialogs.
+
+### 🐛 Bug Fixes
+
+- Prevent crashes when switching drawing modes with unfinished shapes.
+- Fix point cloud file loading crashes on Windows.
+- Fix RF-DETR top-k selection boundaries and preserve empty selections. (#1450)
+- Remove the broken standalone converter entry point that raised a TypeError.
+- Preserve lazy loading of point cloud modules when adding the keyboard shortcuts dialog.
+
+### 🛠️ Improvements
+
+- Unify auto-labeling model loading while preserving static lazy imports. (#1454)
+- Streamline the AI panel layout and remove its redundant close button.
+- Expand English and Chinese point cloud guides, sample datasets, and classification documentation.
+- Run release tests with a virtual display and software OpenGL rendering for point cloud coverage.
+
+### 🌟 Contributors
+
+A total of 3 developers contributed to this release.
+
+Thank @Anai-Guo, @CVHub520, @MNakahara-ishidatec
+
 ## `v4.0.6` (Sep 05, 2026)
 
 X-AnyLabeling 4.0.6 expands external training and model deployment workflows, adds more control to auto-labeling runs, and improves custom model management.

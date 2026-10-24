@@ -36,6 +36,7 @@ a = Analysis(
     pathex=[_p('anylabeling')],
     binaries=[],
     datas=[
+        (_p('anylabeling', 'services', 'auto_labeling', 'osam', 'clip', 'bpe_simple_vocab_16e6.txt.gz'), 'anylabeling/services/auto_labeling/osam/clip'),
         (_p('anylabeling', 'configs', 'auto_labeling', '*.yaml'), 'anylabeling/configs/auto_labeling'),
         (_p('anylabeling', 'configs', '*.yaml'), 'anylabeling/configs'),
         (_p('anylabeling', 'services', 'auto_training', 'ultralytics', 'worker.py'), 'anylabeling/services/auto_training/ultralytics'),
@@ -51,24 +52,57 @@ a = Analysis(
     excludes=[],
 )
 pyz = PYZ(a.pure, a.zipped_data)
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    name=f'X-AnyLabeling-{__version__}-macOS',
-    debug=False,
-    strip=False,
-    upx=False,
-    runtime_tmpdir=None,
-    console=False,
-    icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
-)
-app = BUNDLE(
-    exe,
-    name=f'X-AnyLabeling-v{__version__}-macOS.app',
-    icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
-    bundle_identifier=None,
-    info_plist={'NSHighResolutionCapable': 'True'},
-)
+if os.environ.get('X_ANYLABELING_PACKAGE_MODE') == 'onedir':
+    exe = EXE(
+        pyz,
+        a.scripts,
+        exclude_binaries=True,
+        name='X-AnyLabeling',
+        debug=False,
+        strip=False,
+        upx=False,
+        console=False,
+        icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
+    )
+    collection = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        name='X-AnyLabeling',
+    )
+    app = BUNDLE(
+        collection,
+        name='X-AnyLabeling.app',
+        icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
+        bundle_identifier='com.cvhub.xanylabeling',
+        info_plist={
+            'NSHighResolutionCapable': 'True',
+            'CFBundleShortVersionString': __version__,
+            'CFBundleVersion': __version__,
+        },
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        name=f'X-AnyLabeling-{__version__}-macOS',
+        debug=False,
+        strip=False,
+        upx=False,
+        runtime_tmpdir=None,
+        console=False,
+        icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
+    )
+    app = BUNDLE(
+        exe,
+        name=f'X-AnyLabeling-v{__version__}-macOS.app',
+        icon=_p('anylabeling', 'resources', 'images', 'icon.icns'),
+        bundle_identifier=None,
+        info_plist={'NSHighResolutionCapable': 'True'},
+    )

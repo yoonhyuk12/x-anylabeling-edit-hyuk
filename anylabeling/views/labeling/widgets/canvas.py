@@ -56,7 +56,9 @@ class Canvas(
 ):  # pylint: disable=too-many-public-methods, too-many-instance-attributes
     """Canvas widget to handle label drawing"""
 
-    zoom_request = QtCore.pyqtSignal(int, QtCore.QPoint)
+    zoom_request = QtCore.pyqtSignal(int, QtCore.QPointF)
+    pan_request = QtCore.pyqtSignal(QtCore.QPointF)
+    interaction_started = QtCore.pyqtSignal()
     scroll_request = QtCore.pyqtSignal(float, object, int)
     # [Feature] support for automatically switching to editing mode
     # when the cursor moves over an object
@@ -149,10 +151,15 @@ class Canvas(
         self.prev_point = QtCore.QPointF()
         self.prev_pan_point = QtCore.QPointF()
         self.prev_move_point = QtCore.QPointF()
+        self.pan_offset = QtCore.QPointF()
+        self._right_pan_start = None
+        self._right_pan_prev_point = None
+        self._right_panning = False
         self._space_pressed = False
         self._space_panning = False
         self._space_pan_prev_point = None
         self._space_pan_suppress_until_release = False
+        self._pan_button = QtCore.Qt.MouseButton.LeftButton
         self._vertex_erasing = False
         self._vertex_eraser_cursor_cache = None
         self.offsets = QtCore.QPointF(), QtCore.QPointF()
@@ -383,7 +390,21 @@ class Canvas(
         """Set create mode for canvas"""
         if value not in Shape.get_supported_shape():
             raise ValueError(f"Unsupported create_mode: {value}")
+        changed = self._create_mode != value
         self._create_mode = value
+        if changed:
+            self.cancel_drawing()
+
+    def cancel_drawing(self):
+        """Discard the unfinished shape and its drawing preview."""
+        if self.current is None:
+            return
+        self.current = None
+        self.line.points = []
+        self._brush_drawing = False
+        self.set_hiding(False)
+        self.drawing_polygon.emit(False)
+        self.update()
 
     def store_shapes(self):
         """Store shapes for restoring later (Undo feature)"""
@@ -436,10 +457,13 @@ class Canvas(
 
         clipped_min_x = max(0, min_x)
         clipped_min_y = max(0, min_y)
-        clipped_max_x = min(w - 1, max_x)
-        clipped_max_y = min(h - 1, max_y)
+        clipped_max_x = min(w, max_x)
+        clipped_max_y = min(h, max_y)
 
-        if clipped_max_x <= clipped_min_x or clipped_max_y <= clipped_min_y:
+        if (
+            clipped_max_x - clipped_min_x < 1
+            or clipped_max_y - clipped_min_y < 1
+        ):
             return False
 
         shape.points = [
@@ -478,10 +502,13 @@ class Canvas(
 
         clipped_min_x = max(0, min_x)
         clipped_min_y = max(0, min_y)
-        clipped_max_x = min(w - 1, max_x)
-        clipped_max_y = min(h - 1, max_y)
+        clipped_max_x = min(w, max_x)
+        clipped_max_y = min(h, max_y)
 
-        if clipped_max_x <= clipped_min_x or clipped_max_y <= clipped_min_y:
+        if (
+            clipped_max_x - clipped_min_x < 1
+            or clipped_max_y - clipped_min_y < 1
+        ):
             return False
 
         shape.points = [
@@ -494,6 +521,72 @@ class Canvas(
             (clipped_min_x + clipped_max_x) / 2,
             (clipped_min_y + clipped_max_y) / 2,
         )
+        return True
+
+    def clip_quadrilateral_to_pixmap(self, shape):
+        if self.pixmap is None:
+            return True
+        width, height = self.pixmap.width(), self.pixmap.height()
+        points = [
+            QtCore.QPointF(
+                min(max(point.x(), 0), width),
+                min(max(point.y(), 0), height),
+            )
+            for point in shape.points
+        ]
+        bounds = QtGui.QPolygonF(points).boundingRect()
+        if bounds.width() < 1 or bounds.height() < 1:
+            return False
+        shape.points = points
+        return True
+
+    def clip_polyshape_to_pixmap(self, shape):
+        if self.pixmap is None:
+            return True
+        if shape.shape_type == "quadrilateral":
+            return self.clip_quadrilateral_to_pixmap(shape)
+        closed = shape.shape_type == "polygon"
+        points = list(shape.points)
+        for horizontal, limit in (
+            (True, self.pixmap.width()),
+            (False, self.pixmap.height()),
+        ):
+            cropped = []
+            for index, point in enumerate(points):
+                start = point.x() if horizontal else point.y()
+                if 0 <= start <= limit:
+                    if not cropped or cropped[-1] != point:
+                        cropped.append(point)
+                if not closed and index == len(points) - 1:
+                    break
+                following = points[(index + 1) % len(points)]
+                end = following.x() if horizontal else following.y()
+                if start == end:
+                    continue
+                edges = (0, limit) if end > start else (limit, 0)
+                for edge in edges:
+                    ratio = (edge - start) / (end - start)
+                    if not 0 <= ratio <= 1:
+                        continue
+                    intersection = point + (following - point) * ratio
+                    if horizontal:
+                        intersection.setX(edge)
+                    else:
+                        intersection.setY(edge)
+                    if not cropped or cropped[-1] != intersection:
+                        cropped.append(intersection)
+            points = cropped
+        if closed and len(points) > 1 and points[0] == points[-1]:
+            points.pop()
+        if len(points) < (3 if closed else 2):
+            return False
+        bounds = QtGui.QPolygonF(points).boundingRect()
+        if closed:
+            if bounds.width() < 1 and bounds.height() <= 1:
+                return False
+        elif bounds.width() < 1 and bounds.height() < 1:
+            return False
+        shape.points = points
         return True
 
     @property
@@ -543,6 +636,9 @@ class Canvas(
         """Window out of focus event"""
         self._clear_selection_drag()
         self._clear_space_pan_state()
+        self._right_pan_start = None
+        self._right_pan_prev_point = None
+        self._right_panning = False
         self.restore_cursor()
 
     def is_visible(self, shape):
@@ -1535,6 +1631,8 @@ class Canvas(
         """Set editing mode. Editing is set to False, user is drawing"""
         self._clear_selection_drag()
         self.mode = self.EDIT if value else self.CREATE
+        if value:
+            self.cancel_drawing()
         if not value:  # Create
             self.un_highlight()
             self.deselect_shape()
@@ -1668,6 +1766,7 @@ class Canvas(
         self._space_panning = False
         self._space_pan_prev_point = None
         self._space_pan_suppress_until_release = False
+        self._pan_button = QtCore.Qt.MouseButton.LeftButton
 
     def _restore_space_pan_cursor(self):
         if self._space_pressed:
@@ -1677,9 +1776,17 @@ class Canvas(
         else:
             self.override_cursor(CURSOR_DEFAULT)
 
-    def _start_space_pan(self, point):
+    def _is_pan_gesture(self, ev):
+        return ev.button() == QtCore.Qt.MouseButton.MiddleButton or (
+            self.drawing()
+            and ev.button() == QtCore.Qt.MouseButton.LeftButton
+            and bool(ev.modifiers() & QtCore.Qt.KeyboardModifier.AltModifier)
+        )
+
+    def _start_space_pan(self, point, button=QtCore.Qt.MouseButton.LeftButton):
         if not self._has_valid_pixmap():
             return False
+        self._pan_button = button
         self._space_panning = True
         self._space_pan_suppress_until_release = True
         self._space_pan_prev_point = point
@@ -1880,6 +1987,9 @@ class Canvas(
         if not self.drawing() or not self.current:
             return
         if self.out_off_pixmap(pos) and self.create_mode not in [
+            "polygon",
+            "line",
+            "linestrip",
             "rectangle",
             "rotation",
             "quadrilateral",
@@ -1943,17 +2053,7 @@ class Canvas(
         delta = point - self._space_pan_prev_point
         self._space_pan_prev_point = point
         self.override_cursor(CURSOR_MOVE)
-        self.scroll_request.emit(
-            delta.x() / (self.pixmap.width() * self.scale),
-            Qt.Orientation.Horizontal,
-            1,
-        )
-        self.scroll_request.emit(
-            delta.y() / (self.pixmap.height() * self.scale),
-            Qt.Orientation.Vertical,
-            1,
-        )
-        self.repaint()
+        self.pan_request.emit(delta)
         return True
 
     # QT Overload
@@ -1961,21 +2061,41 @@ class Canvas(
         """Update line with last point and current coordinates"""
         if self.is_loading:
             return
+        if self._right_pan_start is not None:
+            if ev.buttons() & QtCore.Qt.MouseButton.RightButton:
+                point = ev.globalPosition()
+                if not self._right_panning:
+                    distance = (
+                        point - self._right_pan_start
+                    ).manhattanLength()
+                    if distance < QtWidgets.QApplication.startDragDistance():
+                        ev.accept()
+                        return
+                    self._right_panning = True
+                    self._clear_space_pan_hover_state()
+                self.override_cursor(CURSOR_MOVE)
+                self.pan_request.emit(point - self._right_pan_prev_point)
+                self._right_pan_prev_point = point
+                ev.accept()
+                return
+            self._right_pan_start = None
+            self._right_pan_prev_point = None
+            self._right_panning = False
         try:
             pos = self.transform_pos(ev.position())
         except AttributeError:
             return
 
         if self._space_panning:
-            if self._left_button_pressed(ev):
-                self._update_space_pan(ev.position())
+            if ev.buttons() & self._pan_button:
+                self._update_space_pan(ev.globalPosition())
                 ev.accept()
                 return
             self._space_panning = False
             self._space_pan_prev_point = None
             self._space_pan_suppress_until_release = False
         if self._space_pan_suppress_until_release:
-            if self._left_button_pressed(ev):
+            if ev.buttons() & self._pan_button:
                 ev.accept()
                 return
             self._space_pan_suppress_until_release = False
@@ -2051,6 +2171,9 @@ class Canvas(
 
             color = QtGui.QColor(0, 0, 255)
             if self.out_off_pixmap(pos) and self.create_mode not in [
+                "polygon",
+                "line",
+                "linestrip",
                 "rectangle",
                 "rotation",
                 "quadrilateral",
@@ -2225,18 +2348,9 @@ class Canvas(
                     and self.pixmap.height()
                 ):
                     self.override_cursor(CURSOR_MOVE)
-                    delta = ev.position() - self.prev_pan_point
-                    self.scroll_request.emit(
-                        delta.x() / (self.pixmap.width() * self.scale),
-                        Qt.Orientation.Horizontal,
-                        1,
-                    )
-                    self.scroll_request.emit(
-                        delta.y() / (self.pixmap.height() * self.scale),
-                        Qt.Orientation.Vertical,
-                        1,
-                    )
-                    self.repaint()
+                    delta = ev.globalPosition() - self.prev_pan_point
+                    self.prev_pan_point = ev.globalPosition()
+                    self.pan_request.emit(delta)
             return
 
         if self.editing() and self.is_move_editing:
@@ -2310,6 +2424,7 @@ class Canvas(
         for shape in self._shape_hit_candidates(pos):
             if (
                 not shape.locked
+                and shape.selected
                 and shape.shape_type == "cuboid"
                 and len(shape.points) == 8
             ):
@@ -2394,7 +2509,7 @@ class Canvas(
             # check if we happen to be inside a shape.
             index = (
                 None
-                if shape.locked
+                if shape.locked or not shape.selected
                 else shape.nearest_vertex(pos, self.epsilon / self.scale)
             )
             index_edge = (
@@ -2422,6 +2537,7 @@ class Canvas(
                 break
             if (
                 index_edge is not None
+                and shape.selected
                 and shape.can_add_point()
                 and shape.shape_type != "quadrilateral"
             ):
@@ -2441,7 +2557,7 @@ class Canvas(
                 self.setStatusTip(self.toolTip())
                 self.update()
                 break
-            shape_hit = False
+            shape_hit = index_edge is not None
             if shape.shape_type in ["point", "line", "linestrip"]:
                 nearest_index = shape.nearest_vertex(
                     pos, self.epsilon * 3 / self.scale
@@ -2481,14 +2597,6 @@ class Canvas(
                     CURSOR_DEFAULT if shape.locked else CURSOR_GRAB
                 )
                 # [Feature] Automatically highlight shape when the mouse is moved inside it
-                if self.h_shape_is_hovered and not self._keep_area_selection:
-                    group_mode = (
-                        ev.modifiers()
-                        == QtCore.Qt.KeyboardModifier.ControlModifier
-                    )
-                    self.select_shape_point(
-                        pos, multiple_selection_mode=group_mode
-                    )
                 self.update()
 
                 if shape.shape_type == "rectangle":
@@ -2514,12 +2622,6 @@ class Canvas(
             self.override_cursor(CURSOR_DEFAULT)
             self.setToolTip("")
             self.setStatusTip("")
-            if (
-                self.h_shape_is_hovered
-                and self.selected_shapes
-                and not self._keep_area_selection
-            ):
-                self.deselect_shape()
         self.vertex_selected.emit(self.h_vertex is not None)
 
         if prev_hover_shape != self.h_shape:
@@ -2594,12 +2696,38 @@ class Canvas(
             self.auto_decode_tracklet.append(marks)
             self.auto_decode_requested.emit(self.auto_decode_tracklet)
 
+    def _prepare_right_click(self, pos, multiple_selection_mode=False):
+        if not self.selected_shapes or (
+            self.h_shape is not None
+            and self.h_shape not in self.selected_shapes
+        ):
+            self.select_shape_point(pos, multiple_selection_mode)
+            self.update()
+        self.prev_point = pos
+
     # QT Overload
     def mousePressEvent(self, ev):  # noqa: C901
         """Mouse press event"""
         if self.is_loading:
             return
+        self.interaction_started.emit()
         self._pending_edge_point = None
+        if self._is_pan_gesture(ev) and self._start_space_pan(
+            ev.globalPosition(), ev.button()
+        ):
+            ev.accept()
+            return
+        if (
+            ev.button() == QtCore.Qt.MouseButton.RightButton
+            and self.editing()
+            and not ev.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
+            and self._has_valid_pixmap()
+        ):
+            self._right_pan_start = ev.globalPosition()
+            self._right_pan_prev_point = ev.globalPosition()
+            self._right_panning = False
+            ev.accept()
+            return
         pos = self.transform_pos(ev.position())
 
         if self.is_brush_mode and self._brush_mouse_press(ev, pos):
@@ -2611,7 +2739,9 @@ class Canvas(
                 and not self._space_pressed
             ):
                 self._space_pan_suppress_until_release = False
-            if self._space_pressed and self._start_space_pan(ev.position()):
+            if self._space_pressed and self._start_space_pan(
+                ev.globalPosition()
+            ):
                 ev.accept()
                 return
             if self.is_magic_wand_mode and self.drawing():
@@ -2714,7 +2844,7 @@ class Canvas(
                         and not self.is_auto_labeling
                         and not self.current
                     ):
-                        self.prev_pan_point = ev.position()
+                        self.prev_pan_point = ev.globalPosition()
                         self.mode_changed.emit()
                 elif not self.out_off_pixmap(pos):
                     # Handle auto decode mode first click
@@ -2739,24 +2869,10 @@ class Canvas(
                         self.set_hiding()
                         self.drawing_polygon.emit(True)
                         self.update()
-                elif self.out_off_pixmap(pos) and self.create_mode in [
+                elif self._has_valid_pixmap() and self.create_mode in [
                     "polygon",
+                    "line",
                     "linestrip",
-                ]:
-                    w = self.pixmap.width()
-                    h = self.pixmap.height()
-                    if w > 0 and h > 0:
-                        pos = QtCore.QPointF(
-                            min(max(pos.x(), 0), w - 1),
-                            min(max(pos.y(), 0), h - 1),
-                        )
-                        self.current = Shape(shape_type=self.create_mode)
-                        self.current.add_point(pos)
-                        self.line.points = [pos, pos]
-                        self.set_hiding()
-                        self.drawing_polygon.emit(True)
-                        self.update()
-                elif self.out_off_pixmap(pos) and self.create_mode in [
                     "rectangle",
                     "rotation",
                     "quadrilateral",
@@ -2779,7 +2895,7 @@ class Canvas(
                     self._set_vertex_eraser_tooltip()
                     self.erase_selected_vertex_at(pos)
                     self.prev_point = pos
-                    self.prev_pan_point = ev.position()
+                    self.prev_pan_point = ev.globalPosition()
                     self.repaint()
                     ev.accept()
                     return
@@ -2796,7 +2912,7 @@ class Canvas(
                         ev.modifiers(),
                     )
                     self.prev_point = pos
-                    self.prev_pan_point = ev.position()
+                    self.prev_pan_point = ev.globalPosition()
                     self.repaint()
                     ev.accept()
                     return
@@ -2863,7 +2979,7 @@ class Canvas(
                     pos, multiple_selection_mode=group_mode
                 )
                 self.prev_point = pos
-                self.prev_pan_point = ev.position()
+                self.prev_pan_point = ev.globalPosition()
                 self.repaint()
         elif (
             ev.button() == QtCore.Qt.MouseButton.RightButton and self.editing()
@@ -2871,21 +2987,26 @@ class Canvas(
             group_mode = (
                 ev.modifiers() == QtCore.Qt.KeyboardModifier.ControlModifier
             )
-            if not self.selected_shapes or (
-                self.h_shape is not None
-                and self.h_shape not in self.selected_shapes
-            ):
-                self.select_shape_point(
-                    pos, multiple_selection_mode=group_mode
-                )
-                self.repaint()
-            self.prev_point = pos
+            self._prepare_right_click(pos, group_mode)
 
     # QT Overload
     def mouseReleaseEvent(self, ev):
         """Mouse release event"""
         if self.is_loading:
             return
+        right_click = False
+        if (
+            ev.button() == QtCore.Qt.MouseButton.RightButton
+            and self._right_pan_start is not None
+        ):
+            right_click = not self._right_panning
+            self._right_pan_start = None
+            self._right_pan_prev_point = None
+            self._right_panning = False
+            if not right_click:
+                self._restore_space_pan_cursor()
+                ev.accept()
+                return
 
         if (
             ev.button() == Qt.MouseButton.LeftButton
@@ -2895,7 +3016,7 @@ class Canvas(
             ev.accept()
             return
 
-        if ev.button() == QtCore.Qt.MouseButton.LeftButton and (
+        if ev.button() == self._pan_button and (
             self._space_panning or self._space_pan_suppress_until_release
         ):
             self._space_panning = False
@@ -2914,12 +3035,14 @@ class Canvas(
                 return
             if ev.button() == QtCore.Qt.MouseButton.RightButton:
                 if self._finish_magic_wand() and not self.is_auto_labeling:
-                    self.prev_pan_point = ev.position()
+                    self.prev_pan_point = ev.globalPosition()
                     self.mode_changed.emit()
                 ev.accept()
                 return
 
         if ev.button() == QtCore.Qt.MouseButton.RightButton:
+            if right_click and self.editing():
+                self._prepare_right_click(self.transform_pos(ev.position()))
             menu = self.menus[len(self.selected_shapes_copy) > 0]
             self.restore_cursor()
             if (
@@ -2990,6 +3113,12 @@ class Canvas(
     def mouseDoubleClickEvent(self, ev):
         """Mouse double click event"""
         if self.is_loading:
+            return
+        if (
+            ev.button() == QtCore.Qt.MouseButton.RightButton
+            or self._is_pan_gesture(ev)
+        ):
+            self.mousePressEvent(ev)
             return
         if (
             self._space_pressed
@@ -4192,9 +4321,7 @@ class Canvas(
 
                 mask_path = QtGui.QPainterPath()
                 if shape.shape_type == "polygon":
-                    mask_path.moveTo(shape.points[0])
-                    for point in shape.points[1:]:
-                        mask_path.lineTo(point)
+                    mask_path.addPolygon(QtGui.QPolygonF(shape.points))
                     if shape.is_closed() or len(shape.points) >= 3:
                         mask_path.closeSubpath()
                 elif shape.shape_type == "rectangle":
@@ -4392,74 +4519,17 @@ class Canvas(
         p.setOpacity(1.0)
 
         # Draw texts
-        if self.show_texts:
-            text_color = "#FFFFFF"
-            background_color = "#007BFF"
-            p.setFont(
-                QtGui.QFont(
-                    "Arial", int(max(6.0, int(round(8.0 / Shape.scale))))
-                )
-            )
-            pen = QtGui.QPen(
-                QtGui.QColor(background_color), 8, Qt.PenStyle.SolidLine
-            )
-            p.setPen(pen)
-            for shape in self.shapes:
-                if not shape.visible:
-                    continue
-                description = shape.description
-                if description:
-                    bbox = shape.bounding_rect()
-                    fm = QtGui.QFontMetrics(p.font())
-                    text_rect = fm.tightBoundingRect(description)
-
-                    padding_x = 4
-                    padding_y = 2
-                    rect_width = text_rect.width() + 2 * padding_x
-                    rect_height = fm.height() + 2 * padding_y
-
-                    bg_x = int(bbox.x())
-                    bg_y = int(bbox.y() - rect_height)
-
-                    p.fillRect(
-                        bg_x,
-                        bg_y,
-                        rect_width,
-                        rect_height,
-                        QtGui.QColor(background_color),
-                    )
-
-            pen = QtGui.QPen(
-                QtGui.QColor(text_color), 8, Qt.PenStyle.SolidLine
-            )
-            p.setPen(pen)
-            for shape in self.shapes:
-                if not shape.visible:
-                    continue
-                description = shape.description
-                if description:
-                    bbox = shape.bounding_rect()
-                    fm = QtGui.QFontMetrics(p.font())
-
-                    padding_x = 4
-                    padding_y = 2
-
-                    text_x = int(bbox.x() + padding_x)
-                    text_y = int(bbox.y() - padding_y - fm.descent())
-
-                    p.drawText(
-                        text_x,
-                        text_y,
-                        description,
-                    )
-
         # Draw labels
-        if self.show_labels:
+        if self.show_labels or self.show_texts:
             label_transform = p.transform()
             p.save()
             p.resetTransform()
             p.setFont(QtGui.QFont("Arial", self.label_font_size))
             labels = []
+            leaders = []
+            label_bounds = self.visibleRegion().boundingRect()
+            if label_bounds.isEmpty():
+                label_bounds = self.rect()
             for shape in self.shapes:
                 if not shape.visible:
                     continue
@@ -4469,19 +4539,18 @@ class Canvas(
                     "AUTOLABEL_REMOVE",
                 ]:
                     continue
-                label_text = (
-                    (
-                        f"id:{shape.group_id} "
-                        if shape.group_id is not None
-                        else ""
-                    )
-                    + (f"{shape.label}")
-                    + (
-                        f" {float(shape.score):.2f}"
-                        if (shape.score is not None and self.show_scores)
-                        else ""
-                    )
-                )
+                fields = []
+                if self.show_labels:
+                    label = shape.label or ""
+                    if shape.group_id is not None:
+                        label = f"{label} ({shape.group_id})".strip()
+                    if label:
+                        fields.append(label)
+                    if shape.score is not None and self.show_scores:
+                        fields.append(f"{float(shape.score):.2f}")
+                if self.show_texts and shape.description:
+                    fields.append(shape.description)
+                label_text = " · ".join(fields)
                 if not label_text:
                     continue
                 fm = QtGui.QFontMetrics(p.font())
@@ -4493,16 +4562,15 @@ class Canvas(
 
                 if shape.shape_type in [
                     "rectangle",
-                    "polygon",
                     "rotation",
-                    "quadrilateral",
-                    "cuboid",
                 ]:
                     try:
                         bbox = shape.bounding_rect()
                     except IndexError:
                         continue
                     point = label_transform.map(bbox.topLeft())
+                    if shape.shape_type == "rectangle":
+                        point.setY(point.y() - rect_height)
                     rect = QtCore.QRect(
                         int(point.x()),
                         int(point.y()),
@@ -4515,61 +4583,80 @@ class Canvas(
                             point.y() + rect_height - padding_y - fm.descent()
                         ),
                     )
-                elif shape.shape_type == "circle":
-                    points = shape.points
-                    if not points:
-                        continue
-                    point = label_transform.map(points[0])
-                    rect = QtCore.QRect(
-                        int(point.x() - rect_width / 2),
-                        int(point.y() - rect_height / 2),
-                        rect_width,
-                        rect_height,
-                    )
-                    text_pos = QtCore.QPoint(
-                        int(point.x() - rect_width / 2 + padding_x),
-                        int(
-                            point.y()
-                            + rect_height / 2
-                            - padding_y
-                            - fm.descent()
-                        ),
-                    )
                 elif shape.shape_type in [
+                    "polygon",
+                    "quadrilateral",
+                    "cuboid",
+                    "circle",
                     "line",
                     "linestrip",
                     "point",
                 ]:
-                    points = shape.points
-                    if not points:
+                    if not shape.points:
                         continue
-                    point = label_transform.map(points[0])
+                    anchor = min(shape.points, key=lambda pt: (pt.y(), pt.x()))
+                    if shape.shape_type == "circle":
+                        if len(shape.points) < 2:
+                            continue
+                        center = shape.points[0]
+                        radius = QtCore.QLineF(
+                            center, shape.points[1]
+                        ).length()
+                        anchor = QtCore.QPointF(
+                            center.x(), center.y() - radius
+                        )
+                    point = label_transform.map(anchor)
+                    gap = 24
+                    left = point.x() + gap
+                    if left + rect_width > label_bounds.right():
+                        left = point.x() - gap - rect_width
+                    top = point.y() - gap - rect_height
+                    if top < label_bounds.top():
+                        top = point.y() + gap
+                    left = max(
+                        label_bounds.left(),
+                        min(left, label_bounds.right() - rect_width + 1),
+                    )
+                    top = max(
+                        label_bounds.top(),
+                        min(top, label_bounds.bottom() - rect_height + 1),
+                    )
                     rect = QtCore.QRect(
-                        int(point.x() + shape.point_size),
-                        int(point.y() - 15),
-                        rect_width,
-                        rect_height,
+                        int(left), int(top), rect_width, rect_height
                     )
                     text_pos = QtCore.QPoint(
-                        int(point.x() + shape.point_size + padding_x),
-                        int(
-                            point.y()
-                            - 15
-                            + rect_height
-                            - padding_y
-                            - fm.descent()
-                        ),
+                        rect.left() + padding_x,
+                        rect.bottom() + 1 - padding_y - fm.descent(),
                     )
+                    end_x = (
+                        rect.left()
+                        if point.x() <= rect.center().x()
+                        else rect.right()
+                    )
+                    end = QtCore.QPointF(end_x, rect.center().y())
+                    elbow = QtCore.QPointF(
+                        end.x() - 8 if end_x == rect.left() else end.x() + 8,
+                        end.y(),
+                    )
+                    leaders.append((shape, point, elbow, end))
                 else:
                     continue
                 labels.append((shape, rect, text_pos, label_text))
 
-            pen = QtGui.QPen(QtGui.QColor("#FFA500"), 8, Qt.PenStyle.SolidLine)
-            p.setPen(pen)
+            for shape, start, elbow, end in leaders:
+                color = QtGui.QColor(shape.line_color)
+                color.setAlphaF(0.5)
+                pen = QtGui.QPen(color, 1, Qt.PenStyle.DashLine)
+                pen.setCosmetic(True)
+                p.setPen(pen)
+                p.drawPolyline(QtGui.QPolygonF([start, elbow, end]))
+
+            p.setPen(Qt.PenStyle.NoPen)
             for shape, rect, _, _ in labels:
                 if not shape.visible:
                     continue
-                p.fillRect(rect, shape.line_color)
+                p.setBrush(shape.line_color)
+                p.drawRoundedRect(QtCore.QRectF(rect), 4.0, 4.0)
 
             pen = QtGui.QPen(QtGui.QColor("#000000"), 8, Qt.PenStyle.SolidLine)
             p.setPen(pen)
@@ -4899,7 +4986,7 @@ class Canvas(
         area_width, area_height = area.width(), area.height()
         x = (area_width - w) / (2 * s) if area_width > w else 0
         y = (area_height - h) / (2 * s) if area_height > h else 0
-        return QtCore.QPointF(x, y)
+        return QtCore.QPointF(x, y) + self.pan_offset / s
 
     def out_off_pixmap(self, p):
         """Check if a position is out of pixmap"""
@@ -4929,6 +5016,18 @@ class Canvas(
                 return
         elif self.current.shape_type == "rotation":
             if not self.clip_rotation_to_pixmap(self.current):
+                self.current = None
+                self.set_hiding(False)
+                self.drawing_polygon.emit(False)
+                self.update()
+                return
+        elif self.current.shape_type in [
+            "polygon",
+            "quadrilateral",
+            "line",
+            "linestrip",
+        ]:
+            if not self.clip_polyshape_to_pixmap(self.current):
                 self.current = None
                 self.set_hiding(False)
                 self.drawing_polygon.emit(False)
@@ -5089,12 +5188,21 @@ class Canvas(
         """Mouse wheel event"""
         mods = ev.modifiers()
         delta = ev.angleDelta()
+        if delta.isNull():
+            delta = ev.pixelDelta()
+        if delta.isNull():
+            ev.accept()
+            return
 
-        if self.is_brush_mode:
+        if (
+            self.is_brush_mode
+            and mods & QtCore.Qt.KeyboardModifier.ControlModifier
+        ):
             # Resize the brush instead of zooming/scrolling.
             if delta.y() == 0:
                 ev.accept()
                 return
+            self.interaction_started.emit()
             step = 1 if delta.y() > 0 else -1
             self.brush_radius = int(max(1, min(200, self.brush_radius + step)))
             self.update()
@@ -5108,8 +5216,12 @@ class Canvas(
             and len(self.selected_shapes) == 1
             and self.selected_shapes[0].shape_type == "rectangle"
             and not self.selected_shapes[0].locked
-            and not (mods & QtCore.Qt.KeyboardModifier.ControlModifier)
+            and mods & QtCore.Qt.KeyboardModifier.ControlModifier
         ):
+            if delta.y() == 0:
+                ev.accept()
+                return
+            self.interaction_started.emit()
             try:
                 pos = self.transform_pos(ev.position())
             except AttributeError:
@@ -5144,10 +5256,10 @@ class Canvas(
             ev.accept()
             return
 
-        if mods & QtCore.Qt.KeyboardModifier.ControlModifier:
+        if not mods & QtCore.Qt.KeyboardModifier.ShiftModifier:
             # with Ctrl/Command key
             # zoom
-            self.zoom_request.emit(delta.y(), ev.position().toPoint())
+            self.zoom_request.emit(delta.y(), ev.position())
         else:
             # scroll
             self.scroll_request.emit(
@@ -5331,10 +5443,7 @@ class Canvas(
             return
         if self.drawing():
             if key == QtCore.Qt.Key.Key_Escape and self.current:
-                self.current = None
-                self._brush_drawing = False
-                self.drawing_polygon.emit(False)
-                self.update()
+                self.cancel_drawing()
             elif key == QtCore.Qt.Key.Key_Backspace and self.current:
                 if self.create_mode in ["polygon", "linestrip"]:
                     if len(self.current.points) > 1:
@@ -5494,6 +5603,7 @@ class Canvas(
         self.pixmap = pixmap
         if clear_shapes:
             self.shapes = []
+            self.visible.clear()
         self.update()
 
     def load_shapes(self, shapes, replace=True):
@@ -5551,6 +5661,10 @@ class Canvas(
         self._clear_selection_drag()
         self._keep_area_selection = False
         self._clear_space_pan_state()
+        self.pan_offset = QtCore.QPointF()
+        self._right_pan_start = None
+        self._right_pan_prev_point = None
+        self._right_panning = False
         self.restore_cursor()
         self.pixmap = None
         self.shapes_backups = []

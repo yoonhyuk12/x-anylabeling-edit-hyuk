@@ -22,6 +22,7 @@ class FolderHarness(QtWidgets.QWidget):
     import_image_folder = LabelingWidget.import_image_folder
     _create_file_list_item = LabelingWidget._create_file_list_item
     _set_file_item_checked = LabelingWidget._set_file_item_checked
+    _annotation_checked_text = LabelingWidget._annotation_checked_text
     _label_file_checked = staticmethod(LabelingWidget._label_file_checked)
     _open_unchecked_image = LabelingWidget._open_unchecked_image
     image_list = LabelingWidget.image_list
@@ -36,7 +37,11 @@ class FolderHarness(QtWidgets.QWidget):
         self.file_list_widget.setUniformItemSizes(True)
         self.file_list_widget.addItem(self.filename)
         self.fn_to_index = {self.filename: 0}
-        self.file_status_icons = {True: QtGui.QIcon(), False: QtGui.QIcon()}
+        self.file_status_icons = {
+            True: QtGui.QIcon(),
+            "failed": QtGui.QIcon(),
+            False: QtGui.QIcon(),
+        }
         self.compare_view_manager = mock.Mock()
         self.compare_view_manager.is_active.return_value = False
         self.actions = SimpleNamespace(**{

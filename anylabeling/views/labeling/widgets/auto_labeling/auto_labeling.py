@@ -46,6 +46,8 @@ from anylabeling.views.labeling.widgets.api_token_dialog import ApiTokenDialog
 from anylabeling.views.labeling.widgets.remote_server_dialog import (
     RemoteServerDialog,
 )
+from anylabeling.views.labeling.widgets.popup import Popup
+from anylabeling.views.labeling.utils.qt import new_icon_path
 from anylabeling.views.labeling.widgets.searchable_model_dropdown import (
     load_json,
     save_json,
@@ -227,6 +229,9 @@ class AutoLabelingWidget(QWidget):
         self.model_dropdown.modelSelected.connect(self.on_model_selected)
         self.model_dropdown.modelRemoveRequested.connect(
             self.on_custom_model_remove_requested
+        )
+        self.model_dropdown.modelDownloadDeleteRequested.connect(
+            self.on_downloaded_model_delete_requested
         )
         self.model_selection_button.setAutoDefault(False)
         self.model_selection_button.setDefault(False)
@@ -437,6 +442,7 @@ class AutoLabelingWidget(QWidget):
         self.hide_labeling_widgets()
 
         # Handle close button
+        self.button_close.hide()
         self.button_close.clicked.connect(self.unload_and_hide)
 
         self.auto_labeling_mode_changed.connect(self.update_button_colors)
@@ -626,12 +632,76 @@ class AutoLabelingWidget(QWidget):
 
     def show_model_dropdown(self):
         """Show the model dropdown"""
+        self.refresh_downloaded_models()
         button_pos = self.model_selection_button.mapToGlobal(QPoint(0, 0))
         self.model_dropdown.move(int(button_pos.x()), int(button_pos.y()))
         self.model_dropdown.adjustSize()
         self.model_dropdown.show()
 
+    def refresh_downloaded_models(self):
+        downloaded_models = {
+            config["name"]
+            for config in self.model_manager.get_model_configs()
+            if self.model_manager.get_downloaded_model_files(config["name"])
+        }
+        if downloaded_models == self.model_dropdown.downloaded_models:
+            return
+        self.model_dropdown.downloaded_models = downloaded_models
+        self.model_dropdown.update_models_data(self.model_dropdown.models_data)
+
+    def on_downloaded_model_delete_requested(self, model_name):
+        files = self.model_manager.get_downloaded_model_files(model_name)
+        if not files:
+            self.refresh_downloaded_models()
+            return
+        self.model_dropdown.hide()
+        reply = QMessageBox.question(
+            self,
+            self.tr("Delete downloaded model files"),
+            "\n".join(
+                self.tr(
+                    'Are you sure you want to permanently delete "{path}"?'
+                ).format(path=path)
+                for path in files
+            )
+            + "\n\n"
+            + self.tr(
+                "If needed, these files can be downloaded again "
+                "the next time you use this model."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        loaded_model = self.model_manager.loaded_model_config or {}
+        was_loaded = loaded_model.get("name") == model_name
+        try:
+            self.model_manager.delete_downloaded_model_files(model_name)
+        except (OSError, ValueError, RuntimeError) as error:
+            QMessageBox.warning(
+                self, self.tr("Could not delete model files"), str(error)
+            )
+        else:
+            popup = Popup(
+                self.tr("Model files deleted successfully."),
+                self.parent,
+                icon=new_icon_path("copy-green", "svg"),
+            )
+            popup.show_popup(self.parent)
+        if was_loaded and self.model_manager.loaded_model_config is None:
+            for models in self.model_dropdown.models_data.values():
+                for data in models.values():
+                    data["selected"] = False
+            self.model_dropdown.save_models_data()
+            self.reset_auto_labeling_interaction()
+            self.hide_labeling_widgets()
+            self.model_selection_button.setText(self.tr("No Model"))
+            self.model_selection_button.setEnabled(True)
+        self.refresh_downloaded_models()
+
     def load_custom_model_config(self, config_file):
+        self.reset_auto_labeling_interaction()
         # Unload current model first
         self.model_manager.unload_model()
         self.hide_labeling_widgets()
@@ -661,7 +731,6 @@ class AutoLabelingWidget(QWidget):
         save_json({"models_data": models_data}, _get_models_config_path())
         self.model_dropdown.update_models_data(models_data)
 
-        self.clear_auto_labeling_action_requested.emit()
         self.model_selection_button.setText(config_info["display_name"])
         self.model_selection_button.setEnabled(False)
         return True
@@ -686,7 +755,7 @@ class AutoLabelingWidget(QWidget):
         self.model_dropdown.remove_model_item(model_name)
 
         if was_loaded or (was_selected and not loaded_model):
-            self.clear_auto_labeling_action_requested.emit()
+            self.reset_auto_labeling_interaction()
             self.hide_labeling_widgets()
             self.model_selection_button.setText(self.tr("No Model"))
             self.model_selection_button.setEnabled(True)
@@ -779,7 +848,7 @@ class AutoLabelingWidget(QWidget):
 
             return
 
-        self.clear_auto_labeling_action_requested.emit()
+        self.reset_auto_labeling_interaction()
         self.model_selection_button.setText(
             self.model_info[model_name]["display_name"]
         )
@@ -888,6 +957,16 @@ class AutoLabelingWidget(QWidget):
                 self.add_neg_rect.setStyleSheet(
                     get_toggle_button_style(button_color="#FFB6C1")
                 )
+
+    def reset_auto_labeling_interaction(self):
+        self.skip_auto_prediction = False
+        self.button_auto_decode.setChecked(False)
+        self.on_auto_decode_toggled()
+        self.clear_auto_decode_requested.emit()
+        if self.auto_labeling_mode != AutoLabelingMode.NONE:
+            self.parent.set_edit_mode()
+        else:
+            self.clear_auto_labeling_action_requested.emit()
 
     def set_auto_labeling_mode(self, edit_mode, shape_type=None):
         """Set auto labeling mode"""
@@ -1521,6 +1600,7 @@ class AutoLabelingWidget(QWidget):
         self._set_combobox_tooltip(self.remote_server_select_combobox)
         model_id = self.remote_server_select_combobox.currentData()
         if model_id:
+            self.reset_auto_labeling_interaction()
             self.model_manager.set_remote_server_model(model_id)
             self.update_remote_server_widgets(model_id)
 

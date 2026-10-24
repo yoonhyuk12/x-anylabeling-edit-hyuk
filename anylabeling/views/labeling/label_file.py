@@ -5,6 +5,7 @@ import os.path as osp
 import tempfile
 
 from PIL import ImageFile
+from PyQt6.QtCore import QCoreApplication
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -26,12 +27,16 @@ class LabelFileError(Exception):
 class LabelFile:
     suffix = ".json"
 
-    def __init__(self, filename=None, image_dir=None, *, read_file=None):
+    def __init__(
+        self, filename=None, image_dir=None, image_path=None, *, read_file=None
+    ):
         self.shapes = []
         self.image_path = None
         self.image_data = None
         self.image_dir = image_dir
         self._read_file = read_file
+        self._image_path_override = image_path
+        self.resolved_image_path = None
         if filename is not None:
             self.load(filename)
         self.filename = filename
@@ -96,23 +101,39 @@ class LabelFile:
                             utils.rectangle_from_diagonal(shape_points)
                         )
 
-            data["imagePath"] = osp.basename(data["imagePath"])
-            if data["imageData"] is not None:
-                image_data = base64.b64decode(data["imageData"])
-            else:
-                # relative path from label file to relative path from cwd
+            image_path = self._image_path_override
+            if image_path is None:
                 if self.image_dir:
-                    image_path = osp.join(self.image_dir, data["imagePath"])
+                    image_path = osp.join(
+                        self.image_dir, osp.basename(data["imagePath"])
+                    )
                 else:
                     image_path = osp.join(
                         osp.dirname(filename), data["imagePath"]
                     )
+                    if not osp.isfile(image_path):
+                        local_image_path = osp.join(
+                            osp.dirname(filename),
+                            osp.basename(data["imagePath"]),
+                        )
+                        if osp.isfile(local_image_path):
+                            image_path = local_image_path
+            if data["imageData"] is not None:
+                image_data = base64.b64decode(data["imageData"])
+            else:
+                # relative path from label file to relative path from cwd
                 image_data = self.load_image_file(
                     image_path, read_file=self._read_file
                 )
+                if image_data is None:
+                    raise LabelFileError(
+                        QCoreApplication.translate(
+                            "LabelFile", "Failed opening image file: %s"
+                        )
+                        % image_path
+                    )
 
             flags = data.get("flags", {})
-            image_path = data["imagePath"]
 
             utils.get_pil_img_dim(image_data)
 
@@ -133,12 +154,16 @@ class LabelFile:
 
         # Add new fields if not available
         other_data["description"] = other_data.get("description", "")
-        other_data["checked"] = data.get("checked", False) is True
+        checked = data.get("checked", False)
+        other_data["checked"] = (
+            "failed" if checked == "failed" else checked is True
+        )
 
         # Only replace data after everything is loaded.
         self.flags = flags
         self.shapes = shapes
-        self.image_path = image_path
+        self.image_path = data["imagePath"]
+        self.resolved_image_path = image_path
         self.image_data = image_data
         self.filename = filename
         self.other_data = other_data
@@ -164,7 +189,8 @@ class LabelFile:
             other_data = {}
         if flags is None:
             flags = {}
-        checked = other_data.get("checked", False) is True
+        checked = other_data.get("checked", False)
+        checked = "failed" if checked == "failed" else checked is True
         for i, shape in enumerate(shapes):
             if shape["shape_type"] == "rectangle":
                 sorted_box = LabelConverter.calculate_bounding_box(

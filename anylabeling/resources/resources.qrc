@@ -2,6 +2,15 @@
     <qresource prefix="/images">
         <file>images/alibaba.png</file>
         <file>images/anthropic.png</file>
+        <file>images/maximize-2.svg</file>
+        <file>images/panel-left.svg</file>
+        <file>images/panel-right.svg</file>
+        <file>images/rotate-cw.svg</file>
+        <file>images/squares-unite.svg</file>
+        <file>images/scan-search.svg</file>
+        <file>images/save-plus.svg</file>
+        <file>images/pointcloud-download.svg</file>
+        <file>images/pointcloud-upload.svg</file>
         <file>images/arrow-left.svg</file>
         <file>images/arrow-right.svg</file>
         <file>images/auto-run.png</file>
@@ -97,6 +106,7 @@
         <file>images/line-strip.png</file>
         <file>images/line.png</file>
         <file>images/lock.svg</file>
+        <file>images/unlock.svg</file>
         <file>images/label.png</file>
         <file>images/logo.png</file>
         <file>images/loop.png</file>
@@ -169,6 +179,8 @@
         <file>images/ustc.png</file>     
         <file>images/video.png</file>
         <file>images/video.svg</file>
+        <file>images/command.svg</file>
+        <file>images/keyboard.svg</file>
         <file>images/view.svg</file>
         <file>images/vision.svg</file>
         <file>images/wand.svg</file>

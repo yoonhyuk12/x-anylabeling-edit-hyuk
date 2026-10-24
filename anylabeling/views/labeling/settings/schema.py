@@ -46,6 +46,7 @@ def _settings_translation_markers() -> None:
     QCoreApplication.translate("SettingsDialog", "Canvas")
     QCoreApplication.translate("SettingsDialog", "AI")
     QCoreApplication.translate("SettingsDialog", "Dialog")
+    QCoreApplication.translate("SettingsDialog", "Open Point Cloud Workspace")
     QCoreApplication.translate("SettingsDialog", "File")
     QCoreApplication.translate("SettingsDialog", "View")
     QCoreApplication.translate("SettingsDialog", "Display Label Popup")
@@ -187,7 +188,7 @@ def _settings_translation_markers() -> None:
     )
     QCoreApplication.translate(
         "SettingsDialog",
-        "Use the mouse wheel to adjust rectangle geometry while editing.",
+        "Use Ctrl+Wheel to adjust rectangle geometry while editing. Disabled by default.",
     )
     QCoreApplication.translate(
         "SettingsDialog",
@@ -272,6 +273,87 @@ def _settings_translation_markers() -> None:
         "SettingsDialog",
         "Set the minimum log level shown in the application.",
     )
+    QCoreApplication.translate("SettingsDialog", "Auto Run")
+    QCoreApplication.translate("SettingsDialog", "Auto Label")
+    QCoreApplication.translate("SettingsDialog", "Add Point")
+    QCoreApplication.translate("SettingsDialog", "Clear")
+    QCoreApplication.translate("SettingsDialog", "Finish Object")
+    QCoreApplication.translate("SettingsDialog", "Remove Point")
+    QCoreApplication.translate("SettingsDialog", "Run")
+    QCoreApplication.translate("SettingsDialog", "Open Settings Dialog")
+    QCoreApplication.translate("SettingsDialog", "Open Chatbot Dialog")
+    QCoreApplication.translate("SettingsDialog", "Open VQA Dialog")
+    QCoreApplication.translate(
+        "SettingsDialog", "Open Image Classifier Dialog"
+    )
+    QCoreApplication.translate("SettingsDialog", "Open Video Classifier")
+    QCoreApplication.translate("SettingsDialog", "Open PaddleOCR Dialog")
+    QCoreApplication.translate("SettingsDialog", "Open Overview Dialog")
+    QCoreApplication.translate("SettingsDialog", "Show Navigator Dialog")
+    QCoreApplication.translate(
+        "SettingsDialog", "Open Digit Shortcut Manager Dialog"
+    )
+    QCoreApplication.translate("SettingsDialog", "Open Group ID Manager")
+    QCoreApplication.translate("SettingsDialog", "Open Label Manager Dialog")
+    QCoreApplication.translate("SettingsDialog", "Open Shape Manager Dialog")
+    QCoreApplication.translate("SettingsDialog", "Close")
+    QCoreApplication.translate("SettingsDialog", "Delete File")
+    QCoreApplication.translate("SettingsDialog", "Delete Image File")
+    QCoreApplication.translate("SettingsDialog", "Open")
+    QCoreApplication.translate("SettingsDialog", "Open Dir")
+    QCoreApplication.translate("SettingsDialog", "Open Video")
+    QCoreApplication.translate("SettingsDialog", "Quit")
+    QCoreApplication.translate("SettingsDialog", "Save")
+    QCoreApplication.translate("SettingsDialog", "Save As")
+    QCoreApplication.translate("SettingsDialog", "Save To")
+    QCoreApplication.translate("SettingsDialog", "Switch Next Image")
+    QCoreApplication.translate("SettingsDialog", "Switch Next Unchecked Image")
+    QCoreApplication.translate("SettingsDialog", "Switch Prev Image")
+    QCoreApplication.translate("SettingsDialog", "Switch Prev Unchecked Image")
+    QCoreApplication.translate("SettingsDialog", "Add Point To Edge")
+    QCoreApplication.translate("SettingsDialog", "Copy Polygon")
+    QCoreApplication.translate("SettingsDialog", "Create Brush Polygon")
+    QCoreApplication.translate("SettingsDialog", "Create Magic Wand")
+    QCoreApplication.translate("SettingsDialog", "Create Circle")
+    QCoreApplication.translate("SettingsDialog", "Create Cuboid")
+    QCoreApplication.translate("SettingsDialog", "Create Line")
+    QCoreApplication.translate("SettingsDialog", "Create Linestrip")
+    QCoreApplication.translate("SettingsDialog", "Create Point")
+    QCoreApplication.translate("SettingsDialog", "Create Polygon")
+    QCoreApplication.translate("SettingsDialog", "Create Quadrilateral")
+    QCoreApplication.translate("SettingsDialog", "Create Rectangle")
+    QCoreApplication.translate("SettingsDialog", "Create Rotation")
+    QCoreApplication.translate("SettingsDialog", "Delete Polygon")
+    QCoreApplication.translate("SettingsDialog", "Duplicate Polygon")
+    QCoreApplication.translate("SettingsDialog", "Edit Brush Mode")
+    QCoreApplication.translate("SettingsDialog", "Edit Label")
+    QCoreApplication.translate("SettingsDialog", "Edit Polygon")
+    QCoreApplication.translate("SettingsDialog", "Group Selected Shapes")
+    QCoreApplication.translate("SettingsDialog", "Ungroup Selected Shapes")
+    QCoreApplication.translate("SettingsDialog", "Loop Thru Labels")
+    QCoreApplication.translate("SettingsDialog", "Loop Select Labels")
+    QCoreApplication.translate("SettingsDialog", "Hide Selected Polygons")
+    QCoreApplication.translate("SettingsDialog", "Paste Polygon")
+    QCoreApplication.translate("SettingsDialog", "Remove Selected Point")
+    QCoreApplication.translate("SettingsDialog", "Show Hidden Polygons")
+    QCoreApplication.translate("SettingsDialog", "Undo")
+    QCoreApplication.translate("SettingsDialog", "Undo Last Point")
+    QCoreApplication.translate("SettingsDialog", "Union Selected Shapes")
+    QCoreApplication.translate("SettingsDialog", "Fit Width")
+    QCoreApplication.translate("SettingsDialog", "Fit Window")
+    QCoreApplication.translate("SettingsDialog", "Show Attributes")
+    QCoreApplication.translate("SettingsDialog", "Show Labels")
+    QCoreApplication.translate("SettingsDialog", "Show Linking")
+    QCoreApplication.translate("SettingsDialog", "Show Masks")
+    QCoreApplication.translate("SettingsDialog", "Show Texts")
+    QCoreApplication.translate("SettingsDialog", "Toggle Auto Use Last Gid")
+    QCoreApplication.translate("SettingsDialog", "Toggle Auto Use Last Label")
+    QCoreApplication.translate("SettingsDialog", "Toggle Compare View")
+    QCoreApplication.translate("SettingsDialog", "Toggle Keep Prev Mode")
+    QCoreApplication.translate("SettingsDialog", "Toggle Visibility Shapes")
+    QCoreApplication.translate("SettingsDialog", "Zoom In")
+    QCoreApplication.translate("SettingsDialog", "Zoom Out")
+    QCoreApplication.translate("SettingsDialog", "Zoom To Original")
 
 
 SETTINGS_GENERAL_KEYS = (
@@ -417,6 +499,9 @@ def set_nested_value(data: dict[str, Any], key_path: str, value: Any) -> None:
 
 def _shortcut_label(short_key: str) -> str:
     label_overrides = {
+        "open_pointcloud": QT_TRANSLATE_NOOP(
+            SETTINGS_TRANSLATION_CONTEXT, "Open Point Cloud Workspace"
+        ),
         "open_image_classifier": QT_TRANSLATE_NOOP(
             SETTINGS_TRANSLATION_CONTEXT, "Open Image Classifier Dialog"
         ),
@@ -464,7 +549,13 @@ def _shortcut_label(short_key: str) -> str:
             SETTINGS_TRANSLATION_CONTEXT, "Switch Prev Unchecked Image"
         ),
         "toggle_annotation_checked": QT_TRANSLATE_NOOP(
-            SETTINGS_TRANSLATION_CONTEXT, "Toggle Annotation Checked"
+            SETTINGS_TRANSLATION_CONTEXT, "Check Passed"
+        ),
+        "clear_annotation_checked": QT_TRANSLATE_NOOP(
+            SETTINGS_TRANSLATION_CONTEXT, "Unchecked"
+        ),
+        "fail_annotation_checked": QT_TRANSLATE_NOOP(
+            SETTINGS_TRANSLATION_CONTEXT, "Check Failed"
         ),
         "toggle_image_tags": QT_TRANSLATE_NOOP(
             SETTINGS_TRANSLATION_CONTEXT, "Toggle Image Tags"
@@ -922,7 +1013,7 @@ def _non_shortcut_fields() -> list[SettingField]:
             "Basic",
             description=QT_TRANSLATE_NOOP(
                 SETTINGS_TRANSLATION_CONTEXT,
-                "Use the mouse wheel to adjust rectangle geometry while editing.",
+                "Use Ctrl+Wheel to adjust rectangle geometry while editing. Disabled by default.",
             ),
         ),
         SettingField(
@@ -1346,6 +1437,7 @@ def _shortcut_category_map() -> dict[str, tuple[str, ...]]:
             "open_vqa",
             "open_image_classifier",
             "open_video_classifier",
+            "open_pointcloud",
             "open_paddleocr",
             "show_overview",
             "show_navigator",
@@ -1370,6 +1462,8 @@ def _shortcut_category_map() -> dict[str, tuple[str, ...]]:
             "open_prev",
             "open_prev_unchecked",
             "toggle_annotation_checked",
+            "clear_annotation_checked",
+            "fail_annotation_checked",
         ),
         "Shape": (
             "add_point_to_edge",

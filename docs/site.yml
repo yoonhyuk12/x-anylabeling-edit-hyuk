@@ -12,6 +12,8 @@ examples:
   include: "**/README.md"
 
 workflows:
+  - id: point-cloud
+    document: point_cloud.md
   - id: image-classifier
     document: image_classifier.md
   - id: paddle-ocr

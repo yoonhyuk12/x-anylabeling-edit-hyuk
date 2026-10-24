@@ -214,7 +214,7 @@ class AutoLabelingWidget(QWidget):
         # Init value
         self.initial_conf_value = 0
         self.initial_iou_value = 0
-        self.initial_preserve_annotations_state = False
+        self.initial_preserve_annotations_state = True
         self.skip_detection = False
         self._amg_warning_confirmed = False
 
@@ -365,8 +365,9 @@ class AutoLabelingWidget(QWidget):
         )
 
         # --- Configuration for: toggle_preserve_existing_annotations ---
-        self.toggle_preserve_existing_annotations.setChecked(False)
+        # Preserve existing shapes by default (Replace Off).
         self.toggle_preserve_existing_annotations.setCheckable(True)
+        self.toggle_preserve_existing_annotations.setChecked(True)
         self.toggle_preserve_existing_annotations.setStyleSheet(
             get_normal_button_style()
         )
@@ -377,10 +378,10 @@ class AutoLabelingWidget(QWidget):
             "Existing shapes will be overwritten by new shapes during updates. Click to switch to preserving."
         )
         self.toggle_preserve_existing_annotations.setToolTip(
-            self.toggle_preserve_existing_annotations_tooltip_off
+            self.toggle_preserve_existing_annotations_tooltip_on
         )
         self.toggle_preserve_existing_annotations.setText(
-            self.tr("Replace (On)")
+            self.tr("Replace (Off)")
         )
         self.toggle_preserve_existing_annotations.toggled.connect(
             self._on_toggle_preserve_existing_annotations_toggled
@@ -1183,6 +1184,10 @@ class AutoLabelingWidget(QWidget):
         self.on_reset_tracker()
         self.on_iou_value_changed(initial_iou_value)
         self.on_conf_value_changed(initial_conf_value)
+        if "preserve_existing_annotations" in model_config:
+            preserve = bool(model_config["preserve_existing_annotations"])
+            self.toggle_preserve_existing_annotations.setChecked(preserve)
+            self._on_toggle_preserve_existing_annotations_toggled(preserve)
         self.on_preserve_existing_annotations_state_changed(
             self.initial_preserve_annotations_state
         )

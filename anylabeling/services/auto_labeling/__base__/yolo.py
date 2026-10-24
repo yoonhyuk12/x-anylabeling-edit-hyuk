@@ -103,7 +103,7 @@ class YOLO(Model):
             if not isinstance(self.input_height, int):
                 self.input_height = self.config.get("input_height", -1)
 
-        self.replace = True
+        self.replace = not self.config.get("preserve_existing_annotations", False)
         self.model_type = self.config["type"]
         self.classes = self.config.get("classes", [])
         self.stride = self.config.get("stride", 32)
